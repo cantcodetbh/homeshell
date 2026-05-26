@@ -4,6 +4,16 @@ A Quickshell desktop layer for Hyprland: ambient bottom-corner bars, drawer surf
 
 ![HomeShell main bar](screenshots/main-bar.png)
 
+## Screenshots
+
+![HomeShell wallpaper drawer](screenshots/wallpaper-drawer.png)
+
+![HomeShell system drawer](screenshots/system-drawer.png)
+
+![HomeShell weather drawer](screenshots/weather-drawer.png)
+
+![HomeShell notifications drawer](screenshots/notifications-drawer.png)
+
 ## Features
 
 - Quickshell bars for workspace, clock, weather, launch, wallpaper, audio, system, notifications, and power controls.
