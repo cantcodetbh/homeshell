@@ -1,0 +1,51 @@
+{
+  "baseDir": "auto",
+  "preferredScreenName": "",
+
+  "layout": {
+    "leftBar": { "x": 18, "width": 220, "bottom": 18, "height": 86 },
+    "rightBar": { "right": 18, "width": 326, "bottom": 18, "height": 44 },
+    "drawerAttachOverlap": 0,
+    "drawerBridgeHeight": 18
+  },
+
+  "motion": {
+    "instant": 90,
+    "fast": 110,
+    "base": 170,
+    "slow": 170,
+    "drawerFast": 220,
+    "drawerBase": 360,
+    "drawerSlow": 460,
+    "closeContent": 160,
+    "closeSurface": 280,
+    "closeTotal": 440,
+    "lift": 1.006,
+    "press": 0.996
+  },
+
+  "style": {
+    "uiBorderWidth": 3,
+    "cornerRadius": 3,
+    "fontFamily": "JetBrainsMono Nerd Font"
+  },
+
+  "paths": {
+    "themeStudio": "",
+    "keybindingOracle": "",
+    "modelCockpit": "",
+    "hyprpicker": "hyprpicker -a",
+    "aiAssistant": "",
+    "hyprexposeToggle": "hyprexpose-toggle",
+    "screenshotScript": "",
+    "updateScript": "",
+    "cliphistScript": "cliphist list | rofi -dmenu | cliphist decode | wl-copy",
+    "lockCommand": "loginctl lock-session",
+    "wallpapersDir": "$HOME/Pictures/wallpapers"
+  },
+
+  "status": {
+    "refreshIntervalMs": 500,
+    "statusScript": "qs-status.py"
+  }
+}

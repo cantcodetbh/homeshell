@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+hypr_conf="$HOME/.config/hypr/hyprland.conf"
+override="$HOME/.config/hypr/conf/homeshell-quickshell.conf"
+
+"$root/scripts/check"
+snap="$("$root/scripts/snapshot-live")"
+echo "snapshot: $snap"
+
+mkdir -p "$HOME/.config/hypr/conf"
+cp -a "$root/hyprland/homeshell-quickshell.conf" "$override"
+touch "$root/state/live-theme-enabled"
+
+cp -a "$hypr_conf" "$hypr_conf.homeshell-preapply"
+if ! grep -Fq "homeshell-quickshell.conf" "$hypr_conf"; then
+  {
+    echo
+    echo "# HomeShell Quickshell integration"
+    echo "source = ~/.config/hypr/conf/homeshell-quickshell.conf"
+  } >>"$hypr_conf"
+fi
+
+"$root/scripts/stop"
+"$root/scripts/launch"
+hyprctl reload || true
+quickshell list --all || true
+echo "applied HomeShell; revert with $root/scripts/revert-live"

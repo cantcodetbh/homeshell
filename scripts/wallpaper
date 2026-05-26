@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+wall_dir="$HOME/Pictures/wallpapers"
+state="$root/state/wallpaper"
+mkdir -p "$root/state"
+
+mapfile -d '' walls < <(find "$wall_dir" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) -print0 | sort -z)
+
+if ((${#walls[@]} == 0)); then
+  echo "no wallpapers found in $wall_dir" >&2
+  exit 1
+fi
+
+mode="${1:-pick}"
+chosen=""
+
+case "$mode" in
+  next)
+    current="$(cat "$state" 2>/dev/null || true)"
+    idx=0
+    for i in "${!walls[@]}"; do
+      if [[ "${walls[$i]}" == "$current" ]]; then
+        idx=$(((i + 1) % ${#walls[@]}))
+        break
+      fi
+    done
+    chosen="${walls[$idx]}"
+    ;;
+  random)
+    current="$(cat "$state" 2>/dev/null || true)"
+    chosen="$(python3 "$root/scripts/wallpaper-intel.py" random "$current" 2>/tmp/homeshell-wallpaper-intel.log || true)"
+    [[ -n "$chosen" && -f "$chosen" && "$chosen" != "$current" ]] || chosen="${walls[$((RANDOM % ${#walls[@]}))]}"
+    ;;
+  set)
+    chosen="${2:-}"
+    ;;
+  pick|*)
+    if command -v rofi >/dev/null 2>&1; then
+      chosen="$(printf '%s\n' "${walls[@]}" | sed "s#^$wall_dir/##" | rofi -dmenu -i -p wallpaper || true)"
+      [[ -n "$chosen" ]] && chosen="$wall_dir/$chosen"
+    else
+      select chosen in "${walls[@]}"; do
+        [[ -n "$chosen" ]] && break
+      done
+    fi
+    ;;
+esac
+
+if [[ -z "$chosen" || ! -f "$chosen" ]]; then
+  echo "no wallpaper selected" >&2
+  exit 1
+fi
+
+pgrep -x awww-daemon >/dev/null 2>&1 || awww-daemon >/tmp/homeshell-awww.log 2>&1 &
+sleep 0.2
+awww img "$chosen"
+printf '%s\n' "$chosen" >"$state"
+"$root/scripts/sync-theme" "$chosen"
+python3 "$root/scripts/wallpaper-intel.py" record "$chosen" >/tmp/homeshell-wallpaper-reason.log 2>&1 || true
+echo "$chosen"

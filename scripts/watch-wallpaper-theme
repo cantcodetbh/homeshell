@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state="$root/state/wallpaper"
+wall_dir="${BATTLEARCH_WALLPAPER_DIR:-$HOME/Pictures/wallpapers}"
+last=""
+
+sync_current() {
+  local wallpaper=""
+
+  if [[ -f "$state" ]]; then
+    wallpaper="$(cat "$state" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$wallpaper" && -d "$wall_dir" ]]; then
+    wallpaper="$(find "$wall_dir" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.bmp' \) -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR == 1 {sub(/^[^ ]+ /, ""); print}')"
+  fi
+
+  if [[ -z "$wallpaper" || ! -f "$wallpaper" || "$wallpaper" == "$last" ]]; then
+    return 0
+  fi
+
+  if "$root/scripts/sync-theme" "$wallpaper"; then
+    last="$wallpaper"
+  else
+    echo "warning: theme sync failed for $wallpaper" >&2
+  fi
+}
+
+mkdir -p "$root/state"
+touch "$state"
+sync_current
+
+while true; do
+  if command -v inotifywait >/dev/null 2>&1; then
+    if [[ -d "$wall_dir" ]]; then
+      inotifywait -q -e close_write,move,create,delete_self "$state" "$wall_dir" >/dev/null 2>&1 || true
+    else
+      inotifywait -q -e close_write,move,create,delete_self "$state" >/dev/null 2>&1 || true
+    fi
+  else
+    sleep 2
+  fi
+  sync_current
+done

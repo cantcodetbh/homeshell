@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+config="$root/quickshell/homeshell"
+watcher_pid="$root/state/watch-wallpaper-theme.pid"
+
+quickshell kill --path "$config" --any-display 2>/dev/null || true
+
+ps -C quickshell -o pid=,args= | while read -r pid cmd; do
+  [[ -n "${pid:-}" ]] || continue
+  if [[ "$cmd" == *"$config"* || "$cmd" == *"$config/shell.qml"* ]]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+done
+
+if [[ -f "$watcher_pid" ]]; then
+  pid="$(cat "$watcher_pid" 2>/dev/null || true)"
+  if [[ -n "$pid" ]]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$watcher_pid"
+fi
+
+ps -C bash -o pid=,args= | while read -r pid cmd; do
+  [[ -n "${pid:-}" ]] || continue
+  if [[ "$cmd" == *"$root/scripts/watch-wallpaper-theme"* ]]; then
+    kill "$pid" 2>/dev/null || true
+  fi
+done

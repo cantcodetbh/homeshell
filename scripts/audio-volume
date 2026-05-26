@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+direction="${1:-}"
+step="${2:-5}"
+
+current="$(
+  pactl get-sink-volume @DEFAULT_SINK@ \
+    | awk 'match($0, /[0-9]+%/) { value = substr($0, RSTART, RLENGTH); sub(/%/, "", value); print value; exit }'
+)"
+
+case "$direction" in
+  up)
+    next=$((current + step))
+    ;;
+  down)
+    next=$((current - step))
+    ;;
+  *)
+    echo "usage: audio-volume up|down [step]" >&2
+    exit 2
+    ;;
+esac
+
+if (( next > 100 )); then
+  next=100
+elif (( next < 0 )); then
+  next=0
+fi
+
+pactl set-sink-volume @DEFAULT_SINK@ "${next}%"
+
+mute="$(pactl get-sink-mute @DEFAULT_SINK@)"
+volume="$(
+  pactl get-sink-volume @DEFAULT_SINK@ \
+    | awk 'match($0, /[0-9]+%/) { value = substr($0, RSTART, RLENGTH); sub(/%/, "", value); print value; exit }'
+)"
+muted=false
+icon=""
+if [[ "$mute" == *yes* ]]; then
+  muted=true
+  icon=""
+elif (( volume < 33 )); then
+  icon=""
+elif (( volume < 67 )); then
+  icon=""
+fi
+
+printf '{"text":"%s %s%%","icon":"%s","muted":%s,"volume":%s}\n' "$icon" "$volume" "$icon" "$muted" "$volume"

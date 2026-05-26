@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state="$root/state/wallpaper"
+overrides="$root/state/theme-overrides.json"
+mode="${1:-pick}"
+extra="${2:-}"
+wallpaper="${2:-$(cat "$state" 2>/dev/null || true)}"
+
+case "$mode" in
+  set-index|set-accent)
+    wallpaper="${3:-$(cat "$state" 2>/dev/null || true)}"
+    ;;
+  breed)
+    wallpaper="${4:-$(cat "$state" 2>/dev/null || true)}"
+    ;;
+esac
+
+mkdir -p "$root/state"
+
+if [[ -z "$wallpaper" || ! -f "$wallpaper" ]]; then
+  echo "no current wallpaper found" >&2
+  exit 1
+fi
+
+python3 - "$root" "$wallpaper" "$mode" "${@:2}" <<'PY'
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import colorsys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+wallpaper = str(Path(sys.argv[2]).resolve())
+mode = sys.argv[3]
+args = sys.argv[4:]
+extra = args[0] if args else ""
+overrides_path = root / "state" / "theme-overrides.json"
+
+def load_overrides():
+    try:
+        data = json.loads(overrides_path.read_text())
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_overrides(data):
+    overrides_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+def matugen_candidates():
+    rows = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        for idx in range(4):
+            proc = subprocess.run(
+                ["matugen", "image", wallpaper, "--json", "hex", "--source-color-index", str(idx), "--quiet"],
+                text=True,
+                capture_output=True,
+            )
+            if proc.returncode != 0:
+                continue
+            raw = "\n".join(line for line in proc.stdout.splitlines() if line != "ok")
+            try:
+                data = json.loads(raw)
+                colors = data["colors"]
+                primary = colors["primary"]["dark"]["color"]
+                secondary = colors["secondary"]["dark"]["color"]
+                tertiary = colors["tertiary"]["dark"]["color"]
+            except Exception:
+                continue
+            rows.append((idx, primary, secondary, tertiary))
+    return rows
+
+def matugen_palette_map():
+    palettes = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        for idx in range(4):
+            proc = subprocess.run(
+                ["matugen", "image", wallpaper, "--json", "hex", "--source-color-index", str(idx), "--quiet"],
+                text=True,
+                capture_output=True,
+            )
+            if proc.returncode != 0:
+                continue
+            raw = "\n".join(line for line in proc.stdout.splitlines() if line != "ok")
+            try:
+                palettes[idx] = json.loads(raw)
+            except Exception:
+                continue
+    return palettes
+
+def rofi_choice(options, prompt):
+    proc = subprocess.run(
+        ["rofi", "-dmenu", "-i", "-p", prompt],
+        input="\n".join(options) + "\n",
+        text=True,
+        capture_output=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+def apply_sync():
+    subprocess.run([str(root / "scripts" / "sync-theme"), wallpaper], check=True)
+
+def hex_to_rgb(hex_color):
+    value = hex_color.lstrip("#")
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+def rgb_to_hex(rgb):
+    return "#" + "".join(f"{max(0, min(255, round(part))):02x}" for part in rgb)
+
+def mix_hex(first, second, second_weight):
+    a = hex_to_rgb(first)
+    b = hex_to_rgb(second)
+    return rgb_to_hex(tuple((a[i] * (1 - second_weight)) + (b[i] * second_weight) for i in range(3)))
+
+def shift_hex(hex_color, sat_mult=1.0, value_mult=1.0):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    s = max(0, min(1, s * sat_mult))
+    v = max(0, min(1, v * value_mult))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def palette_color(data, key, fallback):
+    colors = data.get("colors", {}) if isinstance(data, dict) else {}
+    value = colors.get(key)
+    if isinstance(value, dict):
+        for mode_name in ("dark", "default", "light"):
+            mode_value = value.get(mode_name)
+            if isinstance(mode_value, dict) and isinstance(mode_value.get("color"), str):
+                return mode_value["color"]
+        if isinstance(value.get("color"), str):
+            return value["color"]
+    if isinstance(value, str):
+        return value
+    return fallback
+
+def candidate_label(row):
+    idx, primary, secondary, tertiary = row
+    return f"source {idx}: primary {primary} | secondary {secondary} | tertiary {tertiary}"
+
+def parse_source_index(choice):
+    match = re.match(r"source\s+(\d+):", choice or "")
+    return int(match.group(1)) if match else None
+
+def breed_palette(parent_a, parent_b, anchor):
+    role_fallbacks = {
+        "surface": "#1d1715",
+        "surface_container": "#2b211e",
+        "on_surface": "#efe4dc",
+        "on_surface_variant": "#cdbeb4",
+        "primary": "#a8c5c9",
+        "tertiary": "#d7a86e",
+        "error": "#b85f4d",
+        "secondary": "#7fa8a2",
+    }
+    role_bias = {
+        "surface": 0.72,
+        "surface_container": 0.66,
+        "on_surface": 0.68,
+        "on_surface_variant": 0.58,
+        "primary": 0.34,
+        "secondary": 0.38,
+        "tertiary": 0.40,
+        "error": 0.50,
+    }
+    child = {}
+    for key, fallback in role_fallbacks.items():
+        a = palette_color(parent_a, key, fallback)
+        b = palette_color(parent_b, key, fallback)
+        base = palette_color(anchor, key, fallback)
+        bred = mix_hex(a, b, 0.5)
+        child[key] = mix_hex(bred, base, role_bias.get(key, 0.42))
+    child["primary"] = shift_hex(child["primary"], 1.10, 1.04)
+    child["secondary"] = shift_hex(child["secondary"], 1.04, 1.02)
+    child["tertiary"] = shift_hex(child["tertiary"], 1.08, 1.03)
+    child["error"] = shift_hex(child["error"], 1.05, 1.03)
+    return {
+        "base": child["surface"],
+        "base_alt": child["surface_container"],
+        "text": child["on_surface"],
+        "muted": child["on_surface_variant"],
+        "accent": child["primary"],
+        "amber": child["tertiary"],
+        "red": child["error"],
+        "teal": child["secondary"],
+    }
+
+overrides = load_overrides()
+
+if mode == "clear":
+    if wallpaper in overrides:
+        del overrides[wallpaper]
+        save_overrides(overrides)
+    apply_sync()
+    print(f"cleared theme colour override for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if mode == "show":
+    print(json.dumps(overrides.get(wallpaper, {}), indent=2))
+    raise SystemExit(0)
+
+if mode == "set-index":
+    try:
+        idx = int(extra)
+    except Exception:
+        raise SystemExit("usage: theme-colour set-index INDEX [WALLPAPER]")
+    overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+    save_overrides(overrides)
+    apply_sync()
+    print(f"set source-index {idx} for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if mode == "set-accent":
+    accent = extra.strip()
+    if not re.match(r"^#[0-9a-fA-F]{6}$", accent):
+        raise SystemExit("accent must be #RRGGBB")
+    overrides[wallpaper] = {"mode": "accent", "accent": accent.lower()}
+    save_overrides(overrides)
+    apply_sync()
+    print(f"set custom accent {accent.lower()} for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if mode == "breed":
+    palettes = matugen_palette_map()
+    if len(palettes) < 2:
+        raise SystemExit("not enough theme palettes to breed")
+    rows = matugen_candidates()
+    row_options = [candidate_label(row) for row in rows if row[0] in palettes]
+    if len(args) >= 2:
+        try:
+            first_idx = int(args[0])
+            second_idx = int(args[1])
+        except Exception:
+            raise SystemExit("usage: theme-colour breed [FIRST_INDEX SECOND_INDEX] [WALLPAPER]")
+    else:
+        first_choice = rofi_choice(row_options, "breed parent A") if Path("/usr/bin/rofi").exists() else ""
+        second_choice = rofi_choice(row_options, "breed parent B") if Path("/usr/bin/rofi").exists() else ""
+        first_idx = parse_source_index(first_choice)
+        second_idx = parse_source_index(second_choice)
+    if first_idx not in palettes or second_idx not in palettes:
+        raise SystemExit("invalid breed parent selection")
+    anchor_idx = min(palettes.keys())
+    child_colors = breed_palette(palettes[first_idx], palettes[second_idx], palettes[anchor_idx])
+    overrides[wallpaper] = {
+        "mode": "bred-palette",
+        "parents": [first_idx, second_idx],
+        "anchor_index": anchor_idx,
+        "colors": child_colors,
+    }
+    save_overrides(overrides)
+    apply_sync()
+    print(f"bred sources {first_idx} + {second_idx} for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if mode != "pick":
+    raise SystemExit("usage: theme-colour [pick|breed|clear|show|set-index|set-accent]")
+
+rows = matugen_candidates()
+options = [
+    candidate_label((idx, primary, secondary, tertiary))
+    for idx, primary, secondary, tertiary in rows
+]
+options.append("breed palette: select two parents")
+options.append("custom accent: enter #RRGGBB")
+options.append("clear override")
+
+choice = rofi_choice(options, "theme colour") if Path("/usr/bin/rofi").exists() else ""
+if not choice:
+    print("no theme colour selected")
+    raise SystemExit(1)
+
+if choice == "clear override":
+    if wallpaper in overrides:
+        del overrides[wallpaper]
+        save_overrides(overrides)
+    apply_sync()
+    print(f"cleared theme colour override for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if choice.startswith("custom accent:"):
+    accent = rofi_choice(["#a8c5c9", "#edc06c", "#87d1eb", "#ffb787", "#a2d398"], "custom #hex")
+    if not re.match(r"^#[0-9a-fA-F]{6}$", accent or ""):
+        print("invalid accent")
+        raise SystemExit(1)
+    overrides[wallpaper] = {"mode": "accent", "accent": accent.lower()}
+    save_overrides(overrides)
+    apply_sync()
+    print(f"set custom accent {accent.lower()} for {Path(wallpaper).name}")
+    raise SystemExit(0)
+
+if choice.startswith("breed palette:"):
+    options = [candidate_label(row) for row in rows]
+    first_choice = rofi_choice(options, "breed parent A")
+    second_choice = rofi_choice(options, "breed parent B")
+    first_idx = parse_source_index(first_choice)
+    second_idx = parse_source_index(second_choice)
+    if first_idx is None or second_idx is None:
+        print("invalid breed selection")
+        raise SystemExit(1)
+    subprocess.run([str(root / "scripts" / "theme-colour"), "breed", str(first_idx), str(second_idx), wallpaper], check=True)
+    raise SystemExit(0)
+
+match = re.match(r"source\s+(\d+):", choice)
+if not match:
+    print("invalid selection")
+    raise SystemExit(1)
+
+idx = int(match.group(1))
+overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+save_overrides(overrides)
+apply_sync()
+print(f"set source-index {idx} for {Path(wallpaper).name}")
+PY

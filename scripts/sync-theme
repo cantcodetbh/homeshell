@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+wallpaper="${1:-$(cat "$root/state/wallpaper" 2>/dev/null || true)}"
+mkdir -p "$root/palettes" "$root/state" "$root/theme"
+
+if [[ -z "$wallpaper" || ! -f "$wallpaper" ]]; then
+  echo "no wallpaper supplied for theme sync" >&2
+  exit 1
+fi
+
+printf '%s\n' "$wallpaper" >"$root/state/wallpaper"
+
+if command -v matugen >/dev/null 2>&1; then
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  ok=0
+  for idx in 0 1 2 3; do
+    if matugen image "$wallpaper" --json hex --source-color-index "$idx" --quiet >"$tmp_dir/$idx.raw.json" 2>/tmp/homeshell-matugen.log; then
+      sed '${/^ok$/d;}' "$tmp_dir/$idx.raw.json" >"$tmp_dir/$idx.json"
+      ok=1
+    fi
+  done
+  if [[ "$ok" != 1 ]]; then
+    cat /tmp/homeshell-matugen.log >&2
+    exit 1
+  fi
+  chosen="$(python3 - "$wallpaper" "$tmp_dir" "$root/state/theme-overrides.json" <<'PY'
+import colorsys
+import json
+import math
+import sys
+import warnings
+from collections import Counter
+from pathlib import Path
+
+wallpaper = Path(sys.argv[1])
+tmp_dir = Path(sys.argv[2])
+overrides_path = Path(sys.argv[3])
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+def hex_to_hsv(hex_color):
+    value = hex_color.lstrip("#")
+    r = int(value[0:2], 16) / 255
+    g = int(value[2:4], 16) / 255
+    b = int(value[4:6], 16) / 255
+    return colorsys.rgb_to_hsv(r, g, b)
+
+def hue_distance(a, b):
+    diff = abs(a - b)
+    return min(diff, 1 - diff)
+
+def dominant_hue():
+    try:
+        from PIL import Image
+        img = Image.open(wallpaper).convert("RGB")
+        img.thumbnail((180, 120))
+    except Exception:
+        return None
+
+    buckets = Counter()
+    samples = {}
+    for r, g, b in img.getdata():
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if s < 0.18 or v < 0.12:
+            continue
+        bucket = int(h * 36) % 36
+        weight = s * v
+        buckets[bucket] += weight
+        if bucket not in samples or weight > samples[bucket][0]:
+            samples[bucket] = (weight, h)
+    if not buckets:
+        return None
+    return samples[buckets.most_common(1)[0][0]][1]
+
+try:
+    overrides = json.loads(overrides_path.read_text())
+    override = overrides.get(str(wallpaper.resolve()), {}) if isinstance(overrides, dict) else {}
+except Exception:
+    override = {}
+
+if override.get("mode") == "source-index":
+    override_idx = int(override.get("source_index"))
+    override_path = tmp_dir / f"{override_idx}.json"
+    if override_path.exists():
+        print(f"{override_idx} {override_path}")
+        raise SystemExit(0)
+
+target_hue = dominant_hue()
+candidates = []
+candidate_paths = [path for path in tmp_dir.glob("*.json") if path.stem.isdigit()]
+for path in sorted(candidate_paths, key=lambda p: int(p.stem)):
+    try:
+        data = json.loads(path.read_text())
+        primary = data["colors"]["primary"]["dark"]["color"]
+        h, s, v = hex_to_hsv(primary)
+    except Exception:
+        continue
+    idx = int(path.stem)
+    score = idx if target_hue is None else (hue_distance(h, target_hue) * 1000) - (s * 15) - (v * 5) + (idx * 0.01)
+    candidates.append((score, idx, path))
+
+if not candidates:
+    raise SystemExit(1)
+
+_, idx, path = min(candidates)
+print(f"{idx} {path}")
+PY
+)"
+  chosen_idx="${chosen%% *}"
+  chosen_file="${chosen#* }"
+  cp "$chosen_file" "$root/palettes/matugen-current.json"
+  printf '%s\n' "$chosen_idx" >"$root/palettes/matugen-source-index"
+  python3 - "$wallpaper" "$tmp_dir" "$chosen_idx" "$root/state/theme-candidates.json" "$root/state/theme-overrides.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+wallpaper = str(Path(sys.argv[1]).resolve())
+tmp_dir = Path(sys.argv[2])
+selected_index = int(sys.argv[3])
+out_path = Path(sys.argv[4])
+overrides_path = Path(sys.argv[5])
+
+try:
+    overrides = json.loads(overrides_path.read_text())
+    override = overrides.get(wallpaper, {}) if isinstance(overrides, dict) else {}
+except Exception:
+    override = {}
+
+candidates = []
+for path in sorted(tmp_dir.glob("*.json"), key=lambda p: int(p.stem) if p.stem.isdigit() else 999):
+    if not path.stem.isdigit():
+        continue
+    try:
+        data = json.loads(path.read_text())
+        colors = data["colors"]
+        candidates.append({
+            "index": int(path.stem),
+            "primary": colors["primary"]["dark"]["color"],
+            "secondary": colors["secondary"]["dark"]["color"],
+            "tertiary": colors["tertiary"]["dark"]["color"],
+            "surface": colors["surface"]["dark"]["color"],
+            "text": colors["on_surface"]["dark"]["color"],
+        })
+    except Exception:
+        continue
+
+if not candidates:
+    raise SystemExit("no valid theme colour candidates generated")
+
+selected = next((item for item in candidates if item["index"] == selected_index), {})
+if override.get("mode") == "bred-palette":
+    parents = override.get("parents", [])
+    if isinstance(parents, list) and len(parents) >= 2:
+        selected_reason = "bred source {first} + {second} | wallpaper anchored".format(
+            first=parents[0],
+            second=parents[1],
+        )
+    else:
+        selected_reason = "bred palette | wallpaper anchored"
+else:
+    selected_reason = "source {idx} | primary {primary} | {count} choices".format(
+        idx=selected_index,
+        primary=selected.get("primary", "--"),
+        count=len(candidates),
+    )
+
+out_path.write_text(json.dumps({
+    "wallpaper": wallpaper,
+    "selected_index": selected_index,
+    "selected_reason": selected_reason,
+    "override": override if isinstance(override, dict) else {},
+    "candidates": candidates,
+}, indent=2) + "\n")
+PY
+fi
+
+python3 - "$root" "$wallpaper" <<'PY'
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+wallpaper = sys.argv[2]
+palette = root / "palettes" / "matugen-current.json"
+data = {}
+try:
+    data = json.loads(palette.read_text())
+except Exception:
+    data = {}
+
+def find(key, fallback):
+    colors = data.get("colors")
+    if isinstance(colors, dict):
+        value = colors.get(key)
+        if isinstance(value, dict):
+            for mode in ("dark", "default", "light"):
+                mode_value = value.get(mode)
+                if isinstance(mode_value, dict) and isinstance(mode_value.get("color"), str):
+                    return mode_value["color"]
+            if isinstance(value.get("color"), str):
+                return value["color"]
+        if isinstance(value, str):
+            return value
+
+    stack = [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if key in item and isinstance(item[key], str):
+                return item[key]
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return fallback
+
+colors = {
+    "base": find("surface", "#1d1715"),
+    "base_alt": find("surface_container", "#2b211e"),
+    "text": find("on_surface", "#efe4dc"),
+    "muted": find("on_surface_variant", "#cdbeb4"),
+    "accent": find("primary", "#a8c5c9"),
+    "amber": find("tertiary", "#d7a86e"),
+    "red": find("error", "#b85f4d"),
+    "teal": find("secondary", "#7fa8a2"),
+}
+
+try:
+    overrides = json.loads((root / "state" / "theme-overrides.json").read_text())
+    override = overrides.get(str(Path(wallpaper).resolve()), {}) if isinstance(overrides, dict) else {}
+except Exception:
+    override = {}
+
+if override.get("mode") == "accent":
+    accent = override.get("accent", "")
+    if isinstance(accent, str) and re.match(r"^#[0-9a-fA-F]{6}$", accent):
+        colors["accent"] = accent.lower()
+
+if override.get("mode") == "bred-palette":
+    bred_colors = override.get("colors", {})
+    if isinstance(bred_colors, dict):
+        for key in ("base", "base_alt", "text", "muted", "accent", "amber", "red", "teal"):
+            value = bred_colors.get(key)
+            if isinstance(value, str) and re.match(r"^#[0-9a-fA-F]{6}$", value):
+                colors[key] = value.lower()
+
+def rgb_tuple(hex_color):
+    value = hex_color.lstrip("#")
+    return f"{int(value[0:2], 16)}, {int(value[2:4], 16)}, {int(value[4:6], 16)}"
+
+def mix_hex(first, second, second_weight):
+    first_value = first.lstrip("#")
+    second_value = second.lstrip("#")
+    parts = []
+    for idx in (0, 2, 4):
+        a = int(first_value[idx:idx + 2], 16)
+        b = int(second_value[idx:idx + 2], 16)
+        parts.append(round((a * (1 - second_weight)) + (b * second_weight)))
+    return "#" + "".join(f"{part:02x}" for part in parts)
+
+border_accent = mix_hex(colors["accent"], colors["muted"], 0.42)
+border_secondary = mix_hex(colors["teal"], colors["muted"], 0.48)
+colors["border_accent"] = border_accent
+
+(root / "theme" / "current.json").write_text(json.dumps({"wallpaper": wallpaper, "colors": colors}, indent=2) + "\n")
+(root / "theme" / "current.conf").write_text(
+    "\n".join(
+        [
+            "# Generated by HomeShell sync-theme",
+            f"$homeshell_base = rgb({colors['base'].lstrip('#')})",
+            f"$homeshell_accent = rgb({colors['accent'].lstrip('#')})",
+            f"$homeshell_text = rgb({colors['text'].lstrip('#')})",
+            "",
+        ]
+    )
+)
+(root / "theme" / "hyprland-live.conf").write_text(
+    "\n".join(
+        [
+            "# Generated by HomeShell sync-theme",
+            f"$homeshell_base = rgb({colors['base'].lstrip('#')})",
+            f"$homeshell_base_alt = rgb({colors['base_alt'].lstrip('#')})",
+            f"$homeshell_text = rgb({colors['text'].lstrip('#')})",
+            f"$homeshell_muted = rgb({colors['muted'].lstrip('#')})",
+            f"$homeshell_accent = rgb({colors['accent'].lstrip('#')})",
+            f"$homeshell_border_accent = rgba({border_accent.lstrip('#')}dd)",
+            f"$homeshell_red = rgb({colors['red'].lstrip('#')})",
+            "",
+            "general {",
+            "    border_size = 3",
+            f"    col.active_border = rgba({border_accent.lstrip('#')}dd)",
+            f"    col.inactive_border = rgba({border_accent.lstrip('#')}6b)",
+            "}",
+            "",
+            "group {",
+            f"    col.border_active = rgba({border_accent.lstrip('#')}dd) rgba({border_secondary.lstrip('#')}cc) 45deg",
+            f"    col.border_inactive = rgba({border_accent.lstrip('#')}6b)",
+            f"    col.border_locked_active = rgba({colors['amber'].lstrip('#')}ff)",
+            f"    col.border_locked_inactive = rgba({border_accent.lstrip('#')}6b)",
+            "}",
+            "",
+        ]
+    )
+)
+(root / "theme" / "current.css").write_text(
+    ":root {\n"
+    + "\n".join(f"  --homeshell-{key}: {value};" for key, value in colors.items())
+    + "\n}\n"
+)
+
+(root / "theme" / "hyprlock-pixie-colors.conf").write_text(
+    "\n".join(
+        [
+            "# Generated by HomeShell sync-theme",
+            f"$homeshell_lock_text = rgba({rgb_tuple(colors['accent'])}, 0.96)",
+            f"$homeshell_lock_text_soft = rgba({rgb_tuple(colors['muted'])}, 0.72)",
+            f"$homeshell_lock_input_text = rgba({rgb_tuple(colors['text'])}, 0.90)",
+            f"$homeshell_lock_fail_text = rgba({rgb_tuple(colors['red'])}, 0.88)",
+            f"$homeshell_lock_accent_clear = rgba({rgb_tuple(colors['accent'])}, 0)",
+            "",
+        ]
+    )
+)
+
+icon_src_dir = root / "assets" / "meteocons" / "fill"
+icon_out_dir = root / "theme" / "meteocons"
+icon_out_dir.mkdir(parents=True, exist_ok=True)
+
+def tint_icon(raw_icon, icon_color):
+    tinted = raw_icon.replace("currentColor", icon_color)
+    tinted = re.sub(r'fill="#[0-9a-fA-F]{6}"', f'fill="{icon_color}"', tinted)
+    tinted = re.sub(r'stroke="#[0-9a-fA-F]{6}"', f'stroke="{icon_color}"', tinted)
+    tinted = re.sub(r'fill="url\([^)]+\)"', f'fill="{icon_color}"', tinted)
+    tinted = re.sub(r'stroke="url\([^)]+\)"', f'stroke="{icon_color}"', tinted)
+    tinted = re.sub(r'stop-color="#[0-9a-fA-F]{6}"', f'stop-color="{icon_color}"', tinted)
+    return tinted
+
+def settle_cloud(raw_icon):
+    return re.sub(
+        r'<animateTransform[^>]*type="translate"[^>]*values="0 0;0 -3;0 0"[^>]*/>',
+        "",
+        raw_icon,
+    )
+
+for icon_path in icon_src_dir.glob("*.svg"):
+    raw_icon = settle_cloud(icon_path.read_text())
+    icon_out_dir.joinpath(icon_path.name).write_text(tint_icon(raw_icon, colors["muted"]))
+    icon_out_dir.joinpath(icon_path.name.replace(".svg", "-active.svg")).write_text(tint_icon(raw_icon, colors["accent"]))
+
+(root / "theme" / "swaync-live.css").write_text(
+    "/* Generated by HomeShell sync-theme */\n"
+    f"@define-color cc-bg rgba({rgb_tuple(colors['base'])}, 0.86);\n"
+    f"@define-color noti-bg {colors['base_alt']};\n"
+    f"@define-color noti-border-color {colors['accent']};\n"
+    f"@define-color text-color {colors['text']};\n"
+    f"@define-color text-color-disabled {colors['muted']};\n"
+)
+(root / "theme" / "waybar-live.css").write_text(
+    "/* Generated by HomeShell sync-theme */\n"
+    + "\n".join(
+        [
+            f"@define-color homeshell-base {colors['base']};",
+            f"@define-color homeshell-base-alt {colors['base_alt']};",
+            f"@define-color homeshell-text {colors['text']};",
+            f"@define-color homeshell-muted {colors['muted']};",
+            f"@define-color homeshell-accent {colors['accent']};",
+            f"@define-color homeshell-border-accent {colors['border_accent']};",
+            f"@define-color homeshell-amber {colors['amber']};",
+            f"@define-color homeshell-red {colors['red']};",
+            f"@define-color homeshell-teal {colors['teal']};",
+            "",
+        ]
+    )
+)
+(root / "theme" / "gtk-live.css").write_text(
+    "/* Generated by HomeShell sync-theme */\n"
+    f"@define-color theme_bg_color {colors['base']};\n"
+    f"@define-color theme_fg_color {colors['text']};\n"
+    f"@define-color theme_selected_bg_color {colors['accent']};\n"
+    f"@define-color theme_selected_fg_color {colors['base']};\n"
+    f"@define-color borders {colors['muted']};\n"
+)
+
+# Rofi: dynamic HomeShell variables (used by select configs).
+def rgba(hex_color: str, alpha: float) -> str:
+    value = hex_color.lstrip("#")
+    r = int(value[0:2], 16)
+    g = int(value[2:4], 16)
+    b = int(value[4:6], 16)
+    # Keep alpha short and stable for diffs.
+    a = f"{alpha:.2f}".rstrip("0").rstrip(".")
+    return f"rgba({r}, {g}, {b}, {a})"
+
+(root / "theme" / "rofi-homeshell-colors.rasi").write_text(
+    "\n".join(
+        [
+            "/* Generated by HomeShell sync-theme */",
+            "* {",
+            f"    ba-bg:          {rgba(colors['base'], 0.84)};",
+            f"    ba-bg-soft:     {rgba(colors['base_alt'], 0.78)};",
+            f"    ba-bg-hover:    {rgba(colors['teal'], 0.42)};",
+            f"    ba-bar:         {rgba(colors['teal'], 0.54)};",
+            f"    ba-accent:      {colors['accent']};",
+            f"    ba-accent-dark: {colors['teal']};",
+            f"    ba-fg:          {colors['text']};",
+            f"    ba-muted:       {colors['muted']};",
+            "    ba-border-width: 4px;",
+            "}",
+            "",
+        ]
+    )
+)
+
+if os.environ.get("BATTLEARCH_SYNC_PIXIE_SDDM") == "1":
+    sddm_theme = Path("/usr/share/sddm/themes/pixie")
+    if sddm_theme.exists():
+        try:
+            shutil.copyfile(wallpaper, sddm_theme / "assets" / "background.jpg")
+            (sddm_theme / "theme.conf").write_text(
+                "\n".join(
+                    [
+                        "[General]",
+                        "background=assets/background.jpg",
+                        "",
+                        "# Generated from the current HomeShell wallpaper theme",
+                        f"primaryColor={colors['text']}",
+                        f"accentColor={colors['accent']}",
+                        "autoColor=true",
+                        "use24HourClock=true",
+                        f"backgroundColor={colors['base']}",
+                        f"textColor={colors['text']}",
+                        "",
+                    ]
+                )
+            )
+        except Exception as exc:
+            print(f"warning: could not update Pixie SDDM theme: {exc}", file=sys.stderr)
+PY
+
+if [[ -f "$root/state/live-theme-enabled" || -f "$HOME/.config/hypr/conf/homeshell-quickshell.conf" ]]; then
+  touch "$root/state/live-theme-enabled"
+  "$root/scripts/apply-theme-live" || true
+fi
+
+echo "theme synced from $wallpaper"

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+state="$root/state/weather-preview.json"
+delay="${1:-3}"
+
+icons=(
+  "clear-day|clear day"
+  "clear-night|clear night"
+  "partly-cloudy-day|partly cloudy day"
+  "partly-cloudy-night|partly cloudy night"
+  "cloudy|cloudy"
+  "overcast|overcast"
+  "fog|fog or mist"
+  "drizzle|drizzle"
+  "rain|rain"
+  "sleet|sleet"
+  "snow|snow"
+  "thunderstorms|thunderstorms"
+  "thunderstorms-rain|thunderstorm rain"
+  "hail|hail"
+  "wind|wind"
+  "not-available|unknown weather"
+)
+
+cleanup() {
+  rm -f "$state"
+}
+trap cleanup EXIT INT TERM
+
+for entry in "${icons[@]}"; do
+  icon="${entry%%|*}"
+  label="${entry#*|}"
+  if [[ ! -f "$root/theme/meteocons/$icon.svg" ]]; then
+    continue
+  fi
+  python3 - "$state" "$icon" "$label" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+state = Path(sys.argv[1])
+icon = sys.argv[2]
+label = sys.argv[3]
+state.write_text(json.dumps({
+    "icon_name": icon,
+    "text": "preview",
+    "icon": "",
+    "class": label,
+    "tooltip": f"Preview: {label}\nIcon: {icon}",
+}, indent=2) + "\n")
+PY
+  printf 'showing %-22s %s\n' "$icon" "$label"
+  sleep "$delay"
+done

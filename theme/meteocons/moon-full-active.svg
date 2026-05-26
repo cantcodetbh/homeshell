@@ -1,0 +1,16 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="moon-full" clip-path="url(#clip0_1868_4559)">
+<g id="Moon Phase">
+<circle id="Moon" cx="64" cy="64" r="31.5" fill="#87d1eb" stroke="#87d1eb" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+<defs>
+<linearGradient id="paint0_linear_1868_4559" x1="64" y1="32" x2="64" y2="96" gradientUnits="userSpaceOnUse">
+<stop stop-color="#87d1eb"/>
+<stop offset="1" stop-color="#87d1eb"/>
+</linearGradient>
+<clipPath id="clip0_1868_4559">
+<rect width="128" height="128" fill="white"/>
+</clipPath>
+</defs>
+</svg>

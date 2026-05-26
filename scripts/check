@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+missing=()
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || missing+=("$1")
+}
+
+need python3
+need quickshell
+need hyprctl
+need jq
+need awww
+need grim
+
+if ((${#missing[@]})); then
+  printf 'missing commands: %s\n' "${missing[*]}" >&2
+  exit 1
+fi
+
+python3 -m py_compile "$root/scripts/qs-status.py"
+python3 -m py_compile "$root/scripts/wallpaper-status.py"
+"$root/scripts/qs-status.py" | python3 -m json.tool >/dev/null
+"$root/scripts/wallpaper-status.py" | python3 -m json.tool >/dev/null
+
+bash -n "$root/scripts/launch"
+bash -n "$root/scripts/stop"
+bash -n "$root/scripts/snapshot-live"
+bash -n "$root/scripts/apply-live"
+bash -n "$root/scripts/revert-live"
+bash -n "$root/scripts/wallpaper"
+bash -n "$root/scripts/sync-theme"
+bash -n "$root/scripts/apply-theme-live"
+bash -n "$root/scripts/watch-wallpaper-theme"
+
+timeout 5 quickshell --path "$root/quickshell/homeshell" --log-rules "quickshell.*=false" >/tmp/homeshell-check.log 2>&1 || code=$?
+code="${code:-0}"
+if [[ "$code" != 0 && "$code" != 124 ]]; then
+  cat /tmp/homeshell-check.log >&2
+  exit "$code"
+fi
+
+if hyprctl configerrors >/tmp/homeshell-configerrors.log 2>&1; then
+  if grep -qiE 'error|failed' /tmp/homeshell-configerrors.log; then
+    cat /tmp/homeshell-configerrors.log >&2
+    exit 1
+  fi
+fi
+
+echo "ok: HomeShell static checks passed"

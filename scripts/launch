@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+config="$root/quickshell/homeshell"
+
+mkdir -p "$root/state"
+if ! quickshell list --all 2>/dev/null | grep -Fq "Config path: $config/shell.qml"; then
+  quickshell --daemonize --no-duplicate --path "$config"
+fi
+
+sleep 0.5
+if ! quickshell list --all 2>/dev/null | grep -Fq "Config path: $config/shell.qml"; then
+  echo "quickshell did not remain running for $config" >&2
+  exit 1
+fi

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+stamp="$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$HOME/.config/hypr/conf" "$HOME/.config/swaync" "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0" "$HOME/.config/rofi" "$HOME/.config/hyprlock"
+
+prepare_hyprland_env() {
+  local instances
+
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+  if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+    return 0
+  fi
+
+  instances="$(hyprctl instances -j 2>/dev/null || true)"
+  HYPRLAND_INSTANCE_SIGNATURE="$(printf '%s\n' "$instances" | sed -n 's/.*"instance": "\([^"]*\)".*/\1/p' | head -n 1)"
+  WAYLAND_DISPLAY="$(printf '%s\n' "$instances" | sed -n 's/.*"wl_socket": "\([^"]*\)".*/\1/p' | head -n 1)"
+
+  if [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]]; then
+    export HYPRLAND_INSTANCE_SIGNATURE
+  fi
+  if [[ -n "$WAYLAND_DISPLAY" ]]; then
+    export WAYLAND_DISPLAY
+  fi
+}
+
+backup_once() {
+  local path="$1"
+  if [[ -e "$path" && ! -e "$path.homeshell-pretheme" ]]; then
+    cp -a "$path" "$path.homeshell-pretheme"
+  fi
+}
+
+install_file() {
+  local src="$1"
+  local dst="$2"
+  [[ -f "$src" ]] || return 0
+  backup_once "$dst"
+  cp -a "$src" "$dst"
+}
+
+install_file "$root/theme/hyprland-live.conf" "$HOME/.config/hypr/conf/homeshell-theme.conf"
+if [[ -d "$HOME/.config/waybar" ]]; then
+  install_file "$root/theme/waybar-live.css" "$HOME/.config/waybar/homeshell-colors.css"
+fi
+install_file "$root/theme/swaync-live.css" "$HOME/.config/swaync/homeshell-colors.css"
+install_file "$root/theme/gtk-live.css" "$HOME/.config/gtk-3.0/homeshell.css"
+install_file "$root/theme/gtk-live.css" "$HOME/.config/gtk-4.0/homeshell.css"
+install_file "$root/theme/rofi-homeshell-colors.rasi" "$HOME/.config/rofi/homeshell-colors.rasi"
+install_file "$root/theme/hyprlock-pixie-colors.conf" "$HOME/.config/hyprlock/homeshell-colors.conf"
+
+prepare_hyprland_env
+hyprctl reload >/tmp/homeshell-theme-hyprctl.log 2>&1 || true
+pkill -SIGUSR2 waybar >/tmp/homeshell-theme-waybar.log 2>&1 || true
+if pgrep -x swaync >/dev/null 2>&1 && command -v swaync-client >/dev/null 2>&1; then
+  timeout 2 swaync-client --reload-config >/tmp/homeshell-theme-swaync.log 2>&1 || true
+fi
+
+echo "applied live homeshell theme at $stamp"

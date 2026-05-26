@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+stamp="$(date +%Y%m%d-%H%M%S)"
+snap="$root/snapshots/preapply-$stamp"
+mkdir -p "$snap/config" "$snap/state"
+
+copy_if_exists() {
+  local src="$1"
+  local dst="$2"
+  if [[ -e "$src" ]]; then
+    cp -a "$src" "$dst"
+  fi
+}
+
+copy_if_exists "$HOME/.config/hypr" "$snap/config/hypr"
+copy_if_exists "$HOME/.config/waybar" "$snap/config/waybar"
+copy_if_exists "$HOME/.config/swaync" "$snap/config/swaync"
+copy_if_exists "$HOME/.config/quickshell" "$snap/config/quickshell"
+
+pgrep -a quickshell >"$snap/state/process-quickshell.txt" 2>&1 || true
+pgrep -a waybar >"$snap/state/process-waybar.txt" 2>&1 || true
+hyprctl monitors >"$snap/state/hyprctl-monitors.txt" 2>&1 || true
+hyprctl monitors -j >"$snap/state/hyprctl-monitors.json" 2>&1 || true
+hyprctl layers >"$snap/state/hyprctl-layers.txt" 2>&1 || true
+hyprctl activeworkspace -j >"$snap/state/hyprctl-activeworkspace.json" 2>&1 || true
+hyprctl activewindow -j >"$snap/state/hyprctl-activewindow.json" 2>&1 || true
+hyprctl configerrors >"$snap/state/hyprctl-configerrors.txt" 2>&1 || true
+
+{
+  echo "# Wallpaper hints"
+  rg -n 'awww img|hyprpaper|wallpaper' "$HOME/.config/hypr" "$HOME/.config/waybar" 2>/dev/null || true
+  echo
+  echo "# HomeShell state wallpaper"
+  cat "$root/state/wallpaper" 2>/dev/null || true
+} >"$snap/state/wallpaper-hints.txt"
+
+printf '%s\n' "$snap" >"$root/state/latest-snapshot"
+echo "$snap"
