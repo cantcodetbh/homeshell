@@ -1247,6 +1247,51 @@ ShellRoot {
         onClicked: root.closeDrawer()
       }
 
+      readonly property real safeX: Math.min(drawerPanel.x, drawerAttachedBar.x)
+      readonly property real safeY: Math.min(drawerPanel.y, drawerAttachedBar.y)
+      readonly property real safeRight: Math.max(drawerPanel.x + drawerPanel.width, drawerAttachedBar.x + drawerAttachedBar.width)
+      readonly property real safeBottom: Math.max(drawerPanel.y + drawerPanel.height, drawerAttachedBar.y + drawerAttachedBar.height)
+
+      MouseArea {
+        z: 0.5
+        x: 0
+        y: 0
+        width: parent.width
+        height: Math.max(0, drawerBackdrop.safeY)
+        hoverEnabled: true
+        onEntered: root.leaveShellSurface()
+      }
+
+      MouseArea {
+        z: 0.5
+        x: 0
+        y: drawerBackdrop.safeBottom
+        width: parent.width
+        height: Math.max(0, parent.height - drawerBackdrop.safeBottom)
+        hoverEnabled: true
+        onEntered: root.leaveShellSurface()
+      }
+
+      MouseArea {
+        z: 0.5
+        x: 0
+        y: drawerBackdrop.safeY
+        width: Math.max(0, drawerBackdrop.safeX)
+        height: Math.max(0, drawerBackdrop.safeBottom - drawerBackdrop.safeY)
+        hoverEnabled: true
+        onEntered: root.leaveShellSurface()
+      }
+
+      MouseArea {
+        z: 0.5
+        x: drawerBackdrop.safeRight
+        y: drawerBackdrop.safeY
+        width: Math.max(0, parent.width - drawerBackdrop.safeRight)
+        height: Math.max(0, drawerBackdrop.safeBottom - drawerBackdrop.safeY)
+        hoverEnabled: true
+        onEntered: root.leaveShellSurface()
+      }
+
 
 
       Rectangle {
@@ -1334,12 +1379,14 @@ ShellRoot {
         Behavior on border.color { ColorAnimation { duration: root.drawerMotionBase } }
 
         HoverHandler {
-          onHoveredChanged: hovered ? root.enterShellSurface(root.drawerSide(root.drawerMode)) : root.leaveShellSurface()
+          onHoveredChanged: if (hovered) root.enterShellSurface(root.drawerSide(root.drawerMode))
         }
 
         MouseArea {
           anchors.fill: parent
           acceptedButtons: Qt.AllButtons
+          hoverEnabled: true
+          onEntered: root.enterShellSurface(root.drawerSide(root.drawerMode))
           onClicked: mouse.accepted = true
         }
 
@@ -2089,7 +2136,7 @@ ShellRoot {
         opacity: root.drawerPanelOpen ? 1 : 0
 
         HoverHandler {
-          onHoveredChanged: hovered ? root.enterShellSurface(root.drawerSide(root.drawerMode)) : root.leaveShellSurface()
+          onHoveredChanged: if (hovered) root.enterShellSurface(root.drawerSide(root.drawerMode))
         }
 
         Item {
