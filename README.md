@@ -63,7 +63,7 @@ Try a wallpaper theme:
 ./scripts/wallpaper pick
 ```
 
-The wallpaper picker reads from `~/Pictures/wallpapers`.
+The wallpaper picker reads from `~/Pictures/wallpapers`. This repo includes the curated wallpaper set used in the screenshots under `wallpapers/`; copy or symlink those into `~/Pictures/wallpapers` if you want the same palette rotation.
 
 ## Live Install
 
