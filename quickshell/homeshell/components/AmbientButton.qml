@@ -45,6 +45,7 @@ Rectangle {
   property int rippleX: 0
   property int rippleY: 0
   readonly property bool visualActive: button.active || (button.drawer.length > 0 && shell && shell.drawerMode === button.drawer)
+  readonly property bool borderActive: button.active && !(button.drawer.length > 0 && shell && shell.drawerMode === button.drawer)
 
   width: button.buttonWidth
   height: button.buttonHeight
@@ -52,7 +53,7 @@ Rectangle {
   Layout.preferredHeight: height
   radius: shell ? shell.cornerRadius : 3
   color: "transparent"
-  border.width: visualActive && activeBorder ? (shell ? shell.uiBorderWidth : 3) : 0
+  border.width: borderActive && activeBorder ? (shell ? shell.uiBorderWidth : 3) : 0
   border.color: visualActive ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
   scale: pressed ? (shell ? shell.motionPress : 0.996) : hovered || visualActive ? (shell ? shell.motionLift : 1.006) : 1
 
