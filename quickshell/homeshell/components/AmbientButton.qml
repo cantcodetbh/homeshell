@@ -44,6 +44,7 @@ Rectangle {
   property bool rippleRunning: false
   property int rippleX: 0
   property int rippleY: 0
+  readonly property bool visualActive: button.active || (button.drawer.length > 0 && shell && shell.drawerMode === button.drawer)
 
   width: button.buttonWidth
   height: button.buttonHeight
@@ -51,9 +52,9 @@ Rectangle {
   Layout.preferredHeight: height
   radius: shell ? shell.cornerRadius : 3
   color: "transparent"
-  border.width: active && activeBorder ? (shell ? shell.uiBorderWidth : 3) : 0
-  border.color: active ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
-  scale: pressed ? (shell ? shell.motionPress : 0.996) : hovered || active ? (shell ? shell.motionLift : 1.006) : 1
+  border.width: visualActive && activeBorder ? (shell ? shell.uiBorderWidth : 3) : 0
+  border.color: visualActive ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
+  scale: pressed ? (shell ? shell.motionPress : 0.996) : hovered || visualActive ? (shell ? shell.motionLift : 1.006) : 1
 
   Rectangle {
     id: buttonRipple
@@ -99,7 +100,7 @@ Rectangle {
     anchors.verticalCenterOffset: button.iconOffsetY
     text: button.label
     font.pixelSize: button.iconSize
-    color: button.hovered || button.active ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
+    color: button.hovered || button.visualActive ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
   }
 
   Rectangle {
@@ -111,7 +112,7 @@ Rectangle {
     height: Math.max(18, button.iconSize + 7)
     radius: 1
     rotation: 45
-    color: button.hovered || button.active ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
+    color: button.hovered || button.visualActive ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
   }
 
   Rectangle {
@@ -123,7 +124,7 @@ Rectangle {
     height: Math.max(18, button.iconSize + 7)
     radius: 1
     rotation: -45
-    color: button.hovered || button.active ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
+    color: button.hovered || button.visualActive ? (shell ? shell.accent : "#a8c5c9") : (shell ? shell.muted : "#cdbeb4")
   }
 
   Rectangle {
@@ -176,7 +177,7 @@ Rectangle {
       fillMode: VectorImage.PreserveAspectFit
       assumeTrustedSource: true
       source: shell ? shell.weatherIconUrl(button.imagePath, true) : ""
-      opacity: button.hovered || button.active ? 1 : 0
+      opacity: button.hovered || button.visualActive ? 1 : 0
       animations.loops: -1
       animations.paused: false
       onSourceChanged: animations.restart()
