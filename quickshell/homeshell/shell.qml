@@ -768,6 +768,10 @@ ShellRoot {
       root.toggleDrawer(mode)
     }
 
+    function refresh(): void {
+      quickRefresh.restart()
+    }
+
     function recover(): void {
       root.recoverDrawerLayer()
     }

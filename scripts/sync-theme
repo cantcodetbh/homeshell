@@ -447,4 +447,6 @@ if [[ -f "$root/state/live-theme-enabled" || -f "$HOME/.config/hypr/conf/homeshe
   "$root/scripts/apply-theme-live" || true
 fi
 
+quickshell ipc --path "$root/quickshell/homeshell" --any-display call shell refresh >/dev/null 2>&1 || true
+
 echo "theme synced from $wallpaper"
