@@ -147,11 +147,17 @@ ShellRoot {
     if (side && side.length > 0) shellRaisedSide = side
   }
 
+  function isFullscreenOverlayMode(mode) {
+    return mode === "power" || mode === "overview"
+  }
+
   function leaveShellSurface() {
+    if (isFullscreenOverlayMode(drawerMode)) return
     shellHideTimer.restart()
   }
 
   function hideShellSurfaces() {
+    if (isFullscreenOverlayMode(drawerMode)) return
     if (drawerOpening) return
     if (drawerMode.length > 0 || drawerClosing) {
       closeDrawer()
@@ -1037,6 +1043,7 @@ ShellRoot {
           imagePath: (root.status.weather && root.status.weather.icon_path) || ""
           label: root.weatherIcon()
           iconSize: 74
+          iconOffsetX: 7
           iconOffsetY: -4
           iconClipBottom: 11
           drawer: "weather"
@@ -2216,6 +2223,7 @@ ShellRoot {
             imagePath: (root.status.weather && root.status.weather.icon_path) || ""
             label: root.weatherIcon()
             iconSize: 74
+            iconOffsetX: 7
             iconOffsetY: -4
             iconClipBottom: 11
             drawer: "weather"
