@@ -1,11 +1,11 @@
 :root {
-  --homeshell-base: #0f1416;
-  --homeshell-base_alt: #1b2023;
-  --homeshell-text: #dee3e6;
-  --homeshell-muted: #bfc8cc;
-  --homeshell-accent: #87d1eb;
-  --homeshell-amber: #c2c3eb;
+  --homeshell-base: #13140d;
+  --homeshell-base_alt: #1f2019;
+  --homeshell-text: #e4e3d7;
+  --homeshell-muted: #c7c8b8;
+  --homeshell-accent: #bdce80;
+  --homeshell-amber: #a1d0c5;
   --homeshell-red: #ffb4ab;
-  --homeshell-teal: #b3cad4;
-  --homeshell-border_accent: #9fcdde;
+  --homeshell-teal: #c4caa9;
+  --homeshell-border_accent: #c1cb98;
 }

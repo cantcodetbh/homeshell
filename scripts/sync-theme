@@ -80,7 +80,7 @@ try:
 except Exception:
     override = {}
 
-if override.get("mode") == "source-index":
+if override.get("mode") in ("source-index", "source-variant"):
     override_idx = int(override.get("source_index"))
     override_path = tmp_dir / f"{override_idx}.json"
     if override_path.exists():
@@ -113,8 +113,10 @@ PY
   cp "$chosen_file" "$root/palettes/matugen-current.json"
   printf '%s\n' "$chosen_idx" >"$root/palettes/matugen-source-index"
   python3 - "$wallpaper" "$tmp_dir" "$chosen_idx" "$root/state/theme-candidates.json" "$root/state/theme-overrides.json" <<'PY'
+import colorsys
 import json
 import sys
+import warnings
 from pathlib import Path
 
 wallpaper = str(Path(sys.argv[1]).resolve())
@@ -122,12 +124,185 @@ tmp_dir = Path(sys.argv[2])
 selected_index = int(sys.argv[3])
 out_path = Path(sys.argv[4])
 overrides_path = Path(sys.argv[5])
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 try:
     overrides = json.loads(overrides_path.read_text())
     override = overrides.get(wallpaper, {}) if isinstance(overrides, dict) else {}
 except Exception:
     override = {}
+
+def hex_to_rgb(hex_color):
+    value = hex_color.lstrip("#")
+    return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+def rgb_to_hex(rgb):
+    return "#" + "".join(f"{max(0, min(255, round(part))):02x}" for part in rgb)
+
+def shift_hex(hex_color, sat_mult=1.0, value_mult=1.0):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    s = max(0, min(1, s * sat_mult))
+    v = max(0, min(1, v * value_mult))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def vivid_hex(hex_color, sat_mult=1.25, min_value=0.70):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    s = max(0.58, min(1, s * sat_mult))
+    v = max(min_value, min(0.96, v * 1.10))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def rotate_hex(hex_color, hue_offset, sat_mult=1.0, value_mult=1.0):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    h = (h + hue_offset) % 1
+    s = max(0, min(1, s * sat_mult))
+    v = max(0, min(1, v * value_mult))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def mix_hex(first, second, second_weight):
+    a = hex_to_rgb(first)
+    b = hex_to_rgb(second)
+    return rgb_to_hex(tuple((a[i] * (1 - second_weight)) + (b[i] * second_weight) for i in range(3)))
+
+def candidate_row(idx, variant, colors):
+    suffix = "" if variant == "natural" else f"/{variant}"
+    primary = colors["primary"]["dark"]["color"]
+    secondary = colors["secondary"]["dark"]["color"]
+    tertiary = colors["tertiary"]["dark"]["color"]
+    if variant == "strong":
+        primary = shift_hex(primary, 1.42, 1.07)
+        secondary = shift_hex(secondary, 1.32, 1.05)
+        tertiary = shift_hex(tertiary, 1.38, 1.06)
+    return {
+        "id": f"{idx}{suffix}",
+        "index": f"{idx}{suffix}",
+        "source_index": idx,
+        "variant": variant,
+        "label": f"source {idx}{suffix}",
+        "primary": primary,
+        "secondary": secondary,
+        "tertiary": tertiary,
+        "surface": colors["surface"]["dark"]["color"],
+        "text": colors["on_surface"]["dark"]["color"],
+    }
+
+def hue_distance(first, second):
+    diff = abs(first - second)
+    return min(diff, 1 - diff)
+
+def diverse_samples(samples, limit):
+    chosen = []
+    for sample in samples:
+        if all(hue_distance(sample["h"], other["h"]) >= 0.13 for other in chosen):
+            chosen.append(sample)
+        if len(chosen) >= limit:
+            return chosen
+    for sample in samples:
+        if sample not in chosen:
+            chosen.append(sample)
+        if len(chosen) >= limit:
+            return chosen
+    return chosen
+
+def wildcard_theme_colors(primary, secondary, tertiary, wildcard_idx=0):
+    base_roles = [
+        (primary, secondary, tertiary, 0.38, 0.32),
+        (secondary, tertiary, primary, 0.34, 0.44),
+        (tertiary, primary, secondary, 0.30, 0.38),
+    ]
+    base_a, base_b, base_c, base_mix, alt_mix = base_roles[wildcard_idx % len(base_roles)]
+    base_seed = mix_hex(base_a, base_b, base_mix)
+    base = shift_hex(base_seed, 0.76, 0.22 + (wildcard_idx % 3) * 0.035)
+    base_alt = shift_hex(mix_hex(base_seed, base_c, alt_mix), 0.84, 0.31 + (wildcard_idx % 3) * 0.035)
+    text = shift_hex(mix_hex(primary, "#ffffff", 0.78), 0.42, 1.0)
+    muted = shift_hex(mix_hex(text, tertiary, 0.30), 0.64, 0.92)
+    return {
+        "base": base,
+        "base_alt": base_alt,
+        "text": text,
+        "muted": muted,
+        "accent": primary,
+        "amber": tertiary,
+        "red": shift_hex(mix_hex(primary, tertiary, 0.38), 1.08, 0.96),
+        "teal": secondary,
+    }
+
+def wildcard_candidates(limit=3):
+    try:
+        from PIL import Image
+        img = Image.open(wallpaper).convert("RGB")
+        img.thumbnail((220, 140))
+    except Exception:
+        return []
+
+    buckets = {}
+    for r, g, b in img.getdata():
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if s < 0.28 or v < 0.16 or v > 0.97:
+            continue
+        bucket = int(h * 72) % 72
+        chroma = s * (0.55 + v)
+        current = buckets.get(bucket)
+        if current is None or chroma > current["chroma"]:
+            buckets[bucket] = {"hex": rgb_to_hex((r, g, b)), "h": h, "chroma": chroma, "count": 0}
+        buckets[bucket]["count"] += 1
+
+    if not buckets:
+        return []
+
+    max_count = max(item["count"] for item in buckets.values())
+    dominant_hue = max(buckets.values(), key=lambda item: item["count"])["h"]
+    rare_samples = [
+        item for item in buckets.values()
+        if item["count"] <= max(3, max_count * 0.18)
+    ]
+    if len(rare_samples) < limit:
+        rare_samples = list(buckets.values())
+
+    samples = sorted(
+        rare_samples,
+        key=lambda item: (
+            (item["chroma"] * 1.35)
+            + ((1 - min(1, item["count"] / max_count)) * 0.95)
+            + (hue_distance(item["h"], dominant_hue) * 0.55)
+        ),
+        reverse=True,
+    )
+    if not samples:
+        return []
+
+    seeds = diverse_samples(samples, min(limit + 2, len(samples)))
+    rows = []
+    for wildcard_idx in range(min(limit, max(1, len(seeds)))):
+        seed = seeds[wildcard_idx % len(seeds)]
+        secondary_seed = seeds[(wildcard_idx + 1) % len(seeds)]
+        tertiary_seed = seeds[(wildcard_idx + 2) % len(seeds)]
+        primary = vivid_hex(seed["hex"], 1.18, 0.58)
+        secondary = vivid_hex(secondary_seed["hex"], 1.12, 0.52)
+        tertiary = vivid_hex(tertiary_seed["hex"], 1.10, 0.52)
+        theme_colors = wildcard_theme_colors(primary, secondary, tertiary, wildcard_idx)
+        rows.append({
+            "id": f"wild/{wildcard_idx}",
+            "index": f"wild/{wildcard_idx}",
+            "source_index": -1,
+            "variant": "wildcard",
+            "wildcard_index": wildcard_idx,
+            "label": f"wildcard {wildcard_idx}",
+            "source_hex": seed["hex"],
+            "source_count": seed["count"],
+            "primary": primary,
+            "secondary": secondary,
+            "tertiary": tertiary,
+            "surface": theme_colors["base"],
+            "text": theme_colors["text"],
+            "theme_colors": theme_colors,
+        })
+    return rows
 
 candidates = []
 for path in sorted(tmp_dir.glob("*.json"), key=lambda p: int(p.stem) if p.stem.isdigit() else 999):
@@ -136,21 +311,27 @@ for path in sorted(tmp_dir.glob("*.json"), key=lambda p: int(p.stem) if p.stem.i
     try:
         data = json.loads(path.read_text())
         colors = data["colors"]
-        candidates.append({
-            "index": int(path.stem),
-            "primary": colors["primary"]["dark"]["color"],
-            "secondary": colors["secondary"]["dark"]["color"],
-            "tertiary": colors["tertiary"]["dark"]["color"],
-            "surface": colors["surface"]["dark"]["color"],
-            "text": colors["on_surface"]["dark"]["color"],
-        })
+        idx = int(path.stem)
+        candidates.append(candidate_row(idx, "natural", colors))
+        candidates.append(candidate_row(idx, "strong", colors))
     except Exception:
         continue
+
+candidates.extend(wildcard_candidates())
 
 if not candidates:
     raise SystemExit("no valid theme colour candidates generated")
 
-selected = next((item for item in candidates if item["index"] == selected_index), {})
+selected_id = str(selected_index)
+if override.get("mode") == "source-variant":
+    variant = str(override.get("variant", "natural"))
+    if variant not in ("natural", "strong"):
+        variant = "natural"
+    selected_id = f"{selected_index}/{variant}" if variant != "natural" else str(selected_index)
+if override.get("mode") == "wildcard-palette":
+    selected_id = f"wild/{int(override.get('wildcard_index', 0))}"
+
+selected = next((item for item in candidates if item["id"] == selected_id), {})
 if override.get("mode") == "bred-palette":
     parents = override.get("parents", [])
     if isinstance(parents, list) and len(parents) >= 2:
@@ -160,9 +341,14 @@ if override.get("mode") == "bred-palette":
         )
     else:
         selected_reason = "bred palette | wallpaper anchored"
+elif override.get("mode") == "wildcard-palette":
+    selected_reason = "{label} | wallpaper odd colours | {count} choices".format(
+        label=selected.get("label", selected_id),
+        count=len(candidates),
+    )
 else:
-    selected_reason = "source {idx} | primary {primary} | {count} choices".format(
-        idx=selected_index,
+    selected_reason = "{label} | primary {primary} | {count} choices".format(
+        label=selected.get("label", f"source {selected_index}"),
         primary=selected.get("primary", "--"),
         count=len(candidates),
     )
@@ -170,6 +356,7 @@ else:
 out_path.write_text(json.dumps({
     "wallpaper": wallpaper,
     "selected_index": selected_index,
+    "selected_id": selected_id,
     "selected_reason": selected_reason,
     "override": override if isinstance(override, dict) else {},
     "candidates": candidates,
@@ -179,10 +366,10 @@ fi
 
 python3 - "$root" "$wallpaper" <<'PY'
 import json
-import os
 import re
 import shutil
 import sys
+import colorsys
 from pathlib import Path
 
 root = Path(sys.argv[1])
@@ -263,6 +450,33 @@ def mix_hex(first, second, second_weight):
         parts.append(round((a * (1 - second_weight)) + (b * second_weight)))
     return "#" + "".join(f"{part:02x}" for part in parts)
 
+def shift_hex(hex_color, sat_mult=1.0, value_mult=1.0):
+    value = hex_color.lstrip("#")
+    r = int(value[0:2], 16) / 255
+    g = int(value[2:4], 16) / 255
+    b = int(value[4:6], 16) / 255
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    s = max(0, min(1, s * sat_mult))
+    v = max(0, min(1, v * value_mult))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return "#" + "".join(f"{round(channel * 255):02x}" for channel in (rr, gg, bb))
+
+def apply_color_override(override_colors):
+    if isinstance(override_colors, dict):
+        for key in ("base", "base_alt", "text", "muted", "accent", "amber", "red", "teal"):
+            value = override_colors.get(key)
+            if isinstance(value, str) and re.match(r"^#[0-9a-fA-F]{6}$", value):
+                colors[key] = value.lower()
+
+if override.get("mode") == "source-variant" and override.get("variant") == "strong":
+    colors["accent"] = shift_hex(colors["accent"], 1.42, 1.07)
+    colors["teal"] = shift_hex(colors["teal"], 1.32, 1.05)
+    colors["amber"] = shift_hex(colors["amber"], 1.38, 1.06)
+    colors["red"] = shift_hex(colors["red"], 1.20, 1.04)
+
+if override.get("mode") == "wildcard-palette":
+    apply_color_override(override.get("colors", {}))
+
 border_accent = mix_hex(colors["accent"], colors["muted"], 0.42)
 border_secondary = mix_hex(colors["teal"], colors["muted"], 0.48)
 colors["border_accent"] = border_accent
@@ -307,12 +521,6 @@ colors["border_accent"] = border_accent
         ]
     )
 )
-(root / "theme" / "current.css").write_text(
-    ":root {\n"
-    + "\n".join(f"  --homeshell-{key}: {value};" for key, value in colors.items())
-    + "\n}\n"
-)
-
 (root / "theme" / "hyprlock-pixie-colors.conf").write_text(
     "\n".join(
         [
@@ -326,8 +534,13 @@ colors["border_accent"] = border_accent
         ]
     )
 )
+(root / "theme" / "current.css").write_text(
+    ":root {\n"
+    + "\n".join(f"  --homeshell-{key}: {value};" for key, value in colors.items())
+    + "\n}\n"
+)
 
-icon_src_dir = root / "assets" / "meteocons" / "fill"
+icon_src_dir = root / "assets" / "meteocons" / "fill-animated"
 icon_out_dir = root / "theme" / "meteocons"
 icon_out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -352,6 +565,22 @@ for icon_path in icon_src_dir.glob("*.svg"):
     icon_out_dir.joinpath(icon_path.name).write_text(tint_icon(raw_icon, colors["muted"]))
     icon_out_dir.joinpath(icon_path.name.replace(".svg", "-active.svg")).write_text(tint_icon(raw_icon, colors["accent"]))
 
+(root / "theme" / "waybar-live.css").write_text(
+    "/* Generated by HomeShell sync-theme */\n"
+    + "\n".join(
+        [
+            f"@define-color background {colors['base']};",
+            f"@define-color surface {colors['base_alt']};",
+            f"@define-color foreground {colors['text']};",
+            f"@define-color muted {colors['muted']};",
+            f"@define-color primary {colors['accent']};",
+            f"@define-color secondary {colors['teal']};",
+            f"@define-color warning {colors['amber']};",
+            f"@define-color error {colors['red']};",
+            "",
+        ]
+    )
+)
 (root / "theme" / "swaync-live.css").write_text(
     "/* Generated by HomeShell sync-theme */\n"
     f"@define-color cc-bg rgba({rgb_tuple(colors['base'])}, 0.86);\n"
@@ -359,23 +588,6 @@ for icon_path in icon_src_dir.glob("*.svg"):
     f"@define-color noti-border-color {colors['accent']};\n"
     f"@define-color text-color {colors['text']};\n"
     f"@define-color text-color-disabled {colors['muted']};\n"
-)
-(root / "theme" / "waybar-live.css").write_text(
-    "/* Generated by HomeShell sync-theme */\n"
-    + "\n".join(
-        [
-            f"@define-color homeshell-base {colors['base']};",
-            f"@define-color homeshell-base-alt {colors['base_alt']};",
-            f"@define-color homeshell-text {colors['text']};",
-            f"@define-color homeshell-muted {colors['muted']};",
-            f"@define-color homeshell-accent {colors['accent']};",
-            f"@define-color homeshell-border-accent {colors['border_accent']};",
-            f"@define-color homeshell-amber {colors['amber']};",
-            f"@define-color homeshell-red {colors['red']};",
-            f"@define-color homeshell-teal {colors['teal']};",
-            "",
-        ]
-    )
 )
 (root / "theme" / "gtk-live.css").write_text(
     "/* Generated by HomeShell sync-theme */\n"
@@ -416,34 +628,37 @@ def rgba(hex_color: str, alpha: float) -> str:
     )
 )
 
-if os.environ.get("BATTLEARCH_SYNC_PIXIE_SDDM") == "1":
-    sddm_theme = Path("/usr/share/sddm/themes/pixie")
-    if sddm_theme.exists():
-        try:
-            shutil.copyfile(wallpaper, sddm_theme / "assets" / "background.jpg")
-            (sddm_theme / "theme.conf").write_text(
-                "\n".join(
-                    [
-                        "[General]",
-                        "background=assets/background.jpg",
-                        "",
-                        "# Generated from the current HomeShell wallpaper theme",
-                        f"primaryColor={colors['text']}",
-                        f"accentColor={colors['accent']}",
-                        "autoColor=true",
-                        "use24HourClock=true",
-                        f"backgroundColor={colors['base']}",
-                        f"textColor={colors['text']}",
-                        "",
-                    ]
-                )
+sddm_theme = Path("/usr/share/sddm/themes/pixie")
+if sddm_theme.exists():
+    try:
+        shutil.copyfile(wallpaper, sddm_theme / "assets" / "background.jpg")
+        (sddm_theme / "theme.conf").write_text(
+            "\n".join(
+                [
+                    "[General]",
+                    "# Path to the wallpaper. If it's in the assets folder, use \"assets/background.jpg\"",
+                    "background=assets/background.jpg",
+                    "",
+                    "# Generated from the current HomeShell wallpaper theme",
+                    f"primaryColor={colors['text']}",
+                    f"accentColor={colors['accent']}",
+                    "autoColor=true",
+                    "use24HourClock=true",
+                    f"backgroundColor={colors['base']}",
+                    f"textColor={colors['text']}",
+                    "",
+                    "# Font settings",
+                    "fontFamily=FlexRounded",
+                    "fontSize=12",
+                    "",
+                ]
             )
-        except Exception as exc:
-            print(f"warning: could not update Pixie SDDM theme: {exc}", file=sys.stderr)
+        )
+    except Exception as exc:
+        print(f"warning: could not update Pixie SDDM theme: {exc}", file=sys.stderr)
 PY
 
-if [[ -f "$root/state/live-theme-enabled" || -f "$HOME/.config/hypr/conf/homeshell-quickshell.conf" ]]; then
-  touch "$root/state/live-theme-enabled"
+if [[ -f "$root/state/live-theme-enabled" ]]; then
   "$root/scripts/apply-theme-live" || true
 fi
 

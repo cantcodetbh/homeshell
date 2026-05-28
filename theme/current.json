@@ -1,14 +1,14 @@
 {
-  "wallpaper": "/home/josh/Pictures/wallpapers/coastal-roadside-flowers.png",
+  "wallpaper": "/home/josh/Pictures/wallpapers/green-laundromat-porthole.png",
   "colors": {
-    "base": "#0f1416",
-    "base_alt": "#1b2023",
-    "text": "#dee3e6",
-    "muted": "#bfc8cc",
-    "accent": "#87d1eb",
-    "amber": "#c2c3eb",
+    "base": "#13140d",
+    "base_alt": "#1f2019",
+    "text": "#e4e3d7",
+    "muted": "#c7c8b8",
+    "accent": "#bdce80",
+    "amber": "#a1d0c5",
     "red": "#ffb4ab",
-    "teal": "#b3cad4",
-    "border_accent": "#9fcdde"
+    "teal": "#c4caa9",
+    "border_accent": "#c1cb98"
   }
 }

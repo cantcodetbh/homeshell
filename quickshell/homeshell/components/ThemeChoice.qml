@@ -17,15 +17,18 @@ Rectangle {
 
   Component.onCompleted: { if (shell === null) shell = findShell() }
 
-  property int sourceIndex: -1
+  property string choiceId: ""
+  property string label: "source"
   property string primary: "#a8c5c9"
   property string secondary: "#7fa8a2"
   property string tertiary: "#d7a86e"
   property string surface: "#15110f"
   property string textTone: "#efe4dc"
+  property string variant: ""
   property bool selected: false
   property int keyIndex: -1
   property bool hovered: false
+  readonly property bool wildcard: variant === "wildcard" || choiceId.indexOf("wild/") === 0
   readonly property bool keyboardSelected: keyIndex >= 0 && shell && shell.drawerKeyboardIndex === keyIndex
 
   Layout.fillWidth: true
@@ -50,8 +53,10 @@ Rectangle {
 
       MinimalText {
         Layout.fillWidth: true
-        text: "source " + choice.sourceIndex
-        color: choice.selected || choice.hovered || choice.keyboardSelected
+        text: choice.label
+        color: choice.wildcard
+               ? choice.primary
+               : choice.selected || choice.hovered || choice.keyboardSelected
                ? (shell ? shell.accent : "#a8c5c9")
                : (shell ? shell.textColor : "#efe4dc")
         font.pixelSize: 12
@@ -61,7 +66,7 @@ Rectangle {
       MinimalText {
         Layout.fillWidth: true
         text: choice.primary + "  " + choice.secondary + "  " + choice.tertiary
-        color: shell ? shell.muted : "#cdbeb4"
+        color: choice.wildcard ? (shell ? shell.textColor : "#efe4dc") : (shell ? shell.muted : "#cdbeb4")
         font.pixelSize: 9
         horizontalAlignment: Text.AlignLeft
       }
@@ -97,7 +102,7 @@ Rectangle {
     onExited: choice.hovered = false
     onClicked: {
       if (!shell) return
-      shell.run(shell.baseDir + "/scripts/theme-colour set-index " + choice.sourceIndex)
+      shell.run(shell.baseDir + "/scripts/theme-colour set-index " + choice.choiceId)
     }
   }
 

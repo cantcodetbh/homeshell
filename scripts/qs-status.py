@@ -18,6 +18,28 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 WEATHER_PREVIEW_PATH = PROJECT_DIR / "state" / "weather-preview.json"
 
 
+def hyprland_env():
+    env = os.environ.copy()
+    if env.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return env
+
+    runtime_dir = Path(env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    hypr_root = runtime_dir / "hypr"
+    instances = []
+    try:
+        for item in hypr_root.iterdir():
+            socket = item / ".socket.sock"
+            if socket.exists():
+                instances.append((socket.stat().st_mtime, item.name))
+    except Exception:
+        return env
+
+    if instances:
+        instances.sort(reverse=True)
+        env["HYPRLAND_INSTANCE_SIGNATURE"] = instances[0][1]
+    return env
+
+
 def run(cmd, timeout=2, env=None):
     if shutil.which(cmd[0]) is None:
         return ""
@@ -31,7 +53,8 @@ def run(cmd, timeout=2, env=None):
 
 
 def run_json(cmd, fallback, timeout=2):
-    out = run(cmd, timeout=timeout)
+    env = hyprland_env() if cmd and cmd[0] == "hyprctl" else None
+    out = run(cmd, timeout=timeout, env=env)
     if not out:
         return fallback
     try:
@@ -646,21 +669,22 @@ def theme_status(current_wallpaper=""):
     for key, value in colors.items():
         if isinstance(value, str) and re.match(r"^#[0-9a-fA-F]{6}$", value):
             merged[key] = value
-    result = {"wallpaper": str(data.get("wallpaper", "")), "colors": merged, "selected_index": -1, "override": {}, "candidates": []}
+    result = {"wallpaper": str(data.get("wallpaper", "")), "colors": merged, "selected_index": -1, "selected_id": "", "override": {}, "candidates": []}
 
     def load_candidates():
         try:
             candidates_data = json.loads(candidates_path.read_text())
             if isinstance(candidates_data, dict) and str(candidates_data.get("wallpaper", "")) == result["wallpaper"]:
                 selected_index = int(candidates_data.get("selected_index", -1))
+                selected_id = str(candidates_data.get("selected_id", selected_index if selected_index >= 0 else ""))
                 override = candidates_data.get("override", {}) if isinstance(candidates_data.get("override", {}), dict) else {}
                 candidates = candidates_data.get("candidates", [])
                 if isinstance(candidates, list):
                     selected_reason = str(candidates_data.get("selected_reason", ""))
-                    return selected_index, override, candidates, selected_reason
+                    return selected_index, selected_id, override, candidates, selected_reason
         except Exception:
             pass
-        return -1, {}, [], ""
+        return -1, "", {}, [], ""
 
     def repair_candidates():
         wallpaper = result["wallpaper"]
@@ -690,11 +714,12 @@ def theme_status(current_wallpaper=""):
         except Exception:
             return False
 
-    selected_index, override, candidates, selected_reason = load_candidates()
+    selected_index, selected_id, override, candidates, selected_reason = load_candidates()
     if not candidates and repair_candidates():
-        selected_index, override, candidates, selected_reason = load_candidates()
+        selected_index, selected_id, override, candidates, selected_reason = load_candidates()
 
     result["selected_index"] = selected_index
+    result["selected_id"] = selected_id
     result["override"] = override
     result["candidates"] = candidates
     result["selected_reason"] = selected_reason

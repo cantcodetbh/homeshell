@@ -34,8 +34,8 @@ ShellRoot {
 	  property int selectedWorkspaceId: 1
 	  readonly property int motionInstant: 90
 	  readonly property int motionFast: 110
-	  readonly property int motionBase: 400
-	  readonly property int motionSlow: 400
+	  readonly property int motionBase: 170
+	  readonly property int motionSlow: 170
 	  readonly property int drawerMotionFast: 220
 	  readonly property int drawerMotionBase: 360
 	  readonly property int drawerMotionSlow: 460
@@ -158,8 +158,7 @@ ShellRoot {
 
   function hideShellSurfaces() {
     if (isFullscreenOverlayMode(drawerMode)) return
-    if (drawerOpening) return
-    if (drawerMode.length > 0 || drawerClosing) {
+    if (drawerMode.length > 0 || drawerClosing || drawerOpening) {
       closeDrawer()
       shellDemoteTimer.restart()
     } else {
@@ -357,7 +356,7 @@ ShellRoot {
       }
     } else if (drawerMode === "theme") {
       var candidates = (root.status.theme && root.status.theme.candidates) ? root.status.theme.candidates : []
-      if (idx > 0 && idx <= candidates.length) root.run(root.baseDir + "/scripts/theme-colour set-index " + candidates[idx - 1].index)
+      if (idx > 0 && idx <= candidates.length) root.run(root.baseDir + "/scripts/theme-colour set-index " + (candidates[idx - 1].id || candidates[idx - 1].index))
       else if (idx === candidates.length + 1) root.run(root.baseDir + "/scripts/theme-colour breed")
       else if (idx === candidates.length + 2) root.run(root.baseDir + "/scripts/theme-colour clear")
     } else if (drawerMode === "audio") {
@@ -517,6 +516,9 @@ ShellRoot {
   }
 
   function weatherIcon() {
+    var oldWaybarIcon = (root.status.weather && root.status.weather.icon) || ""
+    if (oldWaybarIcon.length > 0) return oldWaybarIcon
+
     var text = ((root.status.weather && root.status.weather.text) || "") + " " + ((root.status.weather && root.status.weather.tooltip) || "") + " " + ((root.status.weather && root.status.weather.class) || "")
     text = text.toLowerCase()
     if (text.indexOf("thunder") >= 0 || text.indexOf("storm") >= 0) return ""
@@ -1001,7 +1003,7 @@ ShellRoot {
             Layout.preferredHeight: 18
             text: root.status.time || "--:--"
             color: root.calendarTriggerHovered || root.drawerMode === "calendar" ? root.accent : root.textColor
-            font.pixelSize: 16
+            font.pixelSize: 18
             horizontalAlignment: Text.AlignLeft
           }
 
@@ -1638,13 +1640,15 @@ ShellRoot {
               model: (root.status.theme && root.status.theme.candidates) ? root.status.theme.candidates : []
               delegate: ThemeChoice { shell: root;
                 keyIndex: index + 1
-                sourceIndex: modelData.index
+                choiceId: modelData.id || modelData.index
+                label: modelData.label || ("source " + modelData.index)
                 primary: modelData.primary
                 secondary: modelData.secondary
                 tertiary: modelData.tertiary
                 surface: modelData.surface
                 textTone: modelData.text
-                selected: root.status.theme && root.status.theme.selected_index === modelData.index
+                variant: modelData.variant || ""
+                selected: root.status.theme && ((root.status.theme.selected_id && root.status.theme.selected_id === modelData.id) || (!root.status.theme.selected_id && root.status.theme.selected_index === modelData.index))
               }
             }
 
@@ -2182,7 +2186,7 @@ ShellRoot {
               Layout.preferredHeight: 18
               text: root.status.time || "--:--"
               color: root.calendarTriggerHovered || root.drawerMode === "calendar" ? root.accent : root.textColor
-              font.pixelSize: 16
+              font.pixelSize: 18
               horizontalAlignment: Text.AlignLeft
             }
 

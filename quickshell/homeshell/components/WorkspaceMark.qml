@@ -24,15 +24,15 @@ Rectangle {
   property int windows: 0
   property bool hovered: false
 
-  Layout.preferredWidth: 25
-  Layout.preferredHeight: 5
+  Layout.preferredWidth: active ? 34 : 22
+  Layout.preferredHeight: active ? 6 : 5
   radius: shell ? shell.cornerRadius : 3
   color: urgent ? (shell ? shell.red : "#b85f4d")
                 : active ? (shell ? shell.accent : "#a8c5c9")
                 : windows > 0 ? (shell ? shell.muted : "#cdbeb4")
                 : Qt.rgba(shell ? shell.muted.r : 0.8, shell ? shell.muted.g : 0.75, shell ? shell.muted.b : 0.71, 0.28)
-  border.width: active ? 1 : 0
-  border.color: active ? (shell ? shell.textColor : "#efe4dc") : "transparent"
+  border.width: 0
+  border.color: "transparent"
 
   MouseArea {
     anchors.fill: parent

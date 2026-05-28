@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import colorsys
+import warnings
 from pathlib import Path
 
 root = Path(sys.argv[1])
@@ -39,6 +40,7 @@ mode = sys.argv[3]
 args = sys.argv[4:]
 extra = args[0] if args else ""
 overrides_path = root / "state" / "theme-overrides.json"
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 def load_overrides():
     try:
@@ -71,7 +73,22 @@ def matugen_candidates():
                 tertiary = colors["tertiary"]["dark"]["color"]
             except Exception:
                 continue
-            rows.append((idx, primary, secondary, tertiary))
+            rows.append({
+                "id": str(idx),
+                "source_index": idx,
+                "variant": "natural",
+                "primary": primary,
+                "secondary": secondary,
+                "tertiary": tertiary,
+            })
+            rows.append({
+                "id": f"{idx}/strong",
+                "source_index": idx,
+                "variant": "strong",
+                "primary": strengthen_hex(primary, 1.42, 1.07),
+                "secondary": strengthen_hex(secondary, 1.32, 1.05),
+                "tertiary": strengthen_hex(tertiary, 1.38, 1.06),
+            })
     return rows
 
 def matugen_palette_map():
@@ -125,6 +142,144 @@ def shift_hex(hex_color, sat_mult=1.0, value_mult=1.0):
     rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
     return rgb_to_hex((rr * 255, gg * 255, bb * 255))
 
+def strengthen_hex(hex_color, sat_mult=1.35, value_mult=1.06):
+    return shift_hex(hex_color, sat_mult, value_mult)
+
+def vivid_hex(hex_color, sat_mult=1.25, min_value=0.70):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    s = max(0.58, min(1, s * sat_mult))
+    v = max(min_value, min(0.96, v * 1.10))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def rotate_hex(hex_color, hue_offset, sat_mult=1.0, value_mult=1.0):
+    r, g, b = hex_to_rgb(hex_color)
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    h = (h + hue_offset) % 1
+    s = max(0, min(1, s * sat_mult))
+    v = max(0, min(1, v * value_mult))
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s, v)
+    return rgb_to_hex((rr * 255, gg * 255, bb * 255))
+
+def hue_distance(first, second):
+    diff = abs(first - second)
+    return min(diff, 1 - diff)
+
+def diverse_samples(samples, limit):
+    chosen = []
+    for sample in samples:
+        if all(hue_distance(sample["h"], other["h"]) >= 0.13 for other in chosen):
+            chosen.append(sample)
+        if len(chosen) >= limit:
+            return chosen
+    for sample in samples:
+        if sample not in chosen:
+            chosen.append(sample)
+        if len(chosen) >= limit:
+            return chosen
+    return chosen
+
+def wildcard_theme_colors(primary, secondary, tertiary, wildcard_idx=0):
+    base_roles = [
+        (primary, secondary, tertiary, 0.38, 0.32),
+        (secondary, tertiary, primary, 0.34, 0.44),
+        (tertiary, primary, secondary, 0.30, 0.38),
+    ]
+    base_a, base_b, base_c, base_mix, alt_mix = base_roles[wildcard_idx % len(base_roles)]
+    base_seed = mix_hex(base_a, base_b, base_mix)
+    base = shift_hex(base_seed, 0.76, 0.22 + (wildcard_idx % 3) * 0.035)
+    base_alt = shift_hex(mix_hex(base_seed, base_c, alt_mix), 0.84, 0.31 + (wildcard_idx % 3) * 0.035)
+    text = shift_hex(mix_hex(primary, "#ffffff", 0.78), 0.42, 1.0)
+    muted = shift_hex(mix_hex(text, tertiary, 0.30), 0.64, 0.92)
+    return {
+        "base": base,
+        "base_alt": base_alt,
+        "text": text,
+        "muted": muted,
+        "accent": primary,
+        "amber": tertiary,
+        "red": shift_hex(mix_hex(primary, tertiary, 0.38), 1.08, 0.96),
+        "teal": secondary,
+    }
+
+def wildcard_candidates(limit=3):
+    try:
+        from PIL import Image
+        img = Image.open(wallpaper).convert("RGB")
+        img.thumbnail((220, 140))
+    except Exception:
+        return []
+
+    buckets = {}
+    for r, g, b in img.getdata():
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        if s < 0.28 or v < 0.16 or v > 0.97:
+            continue
+        bucket = int(h * 72) % 72
+        chroma = s * (0.55 + v)
+        current = buckets.get(bucket)
+        if current is None or chroma > current["chroma"]:
+            buckets[bucket] = {"hex": rgb_to_hex((r, g, b)), "h": h, "s": s, "v": v, "chroma": chroma, "count": 0}
+        buckets[bucket]["count"] += 1
+
+    if not buckets:
+        return []
+
+    max_count = max(item["count"] for item in buckets.values())
+    dominant_hue = max(buckets.values(), key=lambda item: item["count"])["h"]
+    rare_samples = [
+        item for item in buckets.values()
+        if item["count"] <= max(3, max_count * 0.18)
+    ]
+    if len(rare_samples) < limit:
+        rare_samples = list(buckets.values())
+
+    samples = sorted(
+        rare_samples,
+        key=lambda item: (
+            (item["chroma"] * 1.35)
+            + ((1 - min(1, item["count"] / max_count)) * 0.95)
+            + (hue_distance(item["h"], dominant_hue) * 0.55)
+        ),
+        reverse=True,
+    )
+    if not samples:
+        return []
+
+    seeds = diverse_samples(samples, min(limit + 2, len(samples)))
+    rows = []
+    for wildcard_idx in range(min(limit, max(1, len(seeds)))):
+        seed = seeds[wildcard_idx % len(seeds)]
+        secondary_seed = seeds[(wildcard_idx + 1) % len(seeds)]
+        tertiary_seed = seeds[(wildcard_idx + 2) % len(seeds)]
+        primary = vivid_hex(seed["hex"], 1.18, 0.58)
+        secondary = vivid_hex(secondary_seed["hex"], 1.12, 0.52)
+        tertiary = vivid_hex(tertiary_seed["hex"], 1.10, 0.52)
+        theme_colors = wildcard_theme_colors(primary, secondary, tertiary, wildcard_idx)
+        rows.append({
+            "id": f"wild/{wildcard_idx}",
+            "source_index": -1,
+            "variant": "wildcard",
+            "wildcard_index": wildcard_idx,
+            "label": f"wildcard {wildcard_idx}",
+            "source_hex": seed["hex"],
+            "source_count": seed["count"],
+            "primary": primary,
+            "secondary": secondary,
+            "tertiary": tertiary,
+            "surface": theme_colors["base"],
+            "text": theme_colors["text"],
+            "theme_colors": theme_colors,
+        })
+    return rows
+
+def wildcard_colors(row):
+    colors = row.get("theme_colors")
+    if isinstance(colors, dict):
+        return colors
+    return wildcard_theme_colors(row["primary"], row["secondary"], row["tertiary"])
+
 def palette_color(data, key, fallback):
     colors = data.get("colors", {}) if isinstance(data, dict) else {}
     value = colors.get(key)
@@ -140,12 +295,34 @@ def palette_color(data, key, fallback):
     return fallback
 
 def candidate_label(row):
-    idx, primary, secondary, tertiary = row
-    return f"source {idx}: primary {primary} | secondary {secondary} | tertiary {tertiary}"
+    if row.get("variant") == "wildcard":
+        return (
+            f"{row.get('label', row['id'])}: "
+            f"primary {row['primary']} | secondary {row['secondary']} | tertiary {row['tertiary']}"
+        )
+    suffix = "" if row.get("variant") == "natural" else f"/{row.get('variant')}"
+    return (
+        f"source {row['source_index']}{suffix}: "
+        f"primary {row['primary']} | secondary {row['secondary']} | tertiary {row['tertiary']}"
+    )
 
-def parse_source_index(choice):
-    match = re.match(r"source\s+(\d+):", choice or "")
-    return int(match.group(1)) if match else None
+def parse_source_choice(choice):
+    match = re.match(r"source\s+(\d+)(?:/([a-z0-9_-]+))?:", choice or "")
+    if not match:
+        return None, "natural"
+    return int(match.group(1)), match.group(2) or "natural"
+
+def parse_palette_token(token):
+    wild_match = re.match(r"^wild/(\d+)$", token or "")
+    if wild_match:
+        return "wild", int(wild_match.group(1))
+    match = re.match(r"^(\d+)(?:/([a-z0-9_-]+))?$", token or "")
+    if not match:
+        return None, "natural"
+    variant = match.group(2) or "natural"
+    if variant not in ("natural", "strong"):
+        return None, "natural"
+    return int(match.group(1)), variant
 
 def breed_palette(parent_a, parent_b, anchor):
     role_fallbacks = {
@@ -205,14 +382,27 @@ if mode == "show":
     raise SystemExit(0)
 
 if mode == "set-index":
-    try:
-        idx = int(extra)
-    except Exception:
-        raise SystemExit("usage: theme-colour set-index INDEX [WALLPAPER]")
-    overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+    idx, variant = parse_palette_token(extra)
+    if idx is None:
+        raise SystemExit("usage: theme-colour set-index INDEX[/VARIANT]|wild/N [WALLPAPER]")
+    if idx == "wild":
+        wildcards = wildcard_candidates()
+        row = next((item for item in wildcards if item.get("wildcard_index") == variant), None)
+        if row is None:
+            raise SystemExit("invalid wildcard palette")
+        overrides[wallpaper] = {
+            "mode": "wildcard-palette",
+            "wildcard_index": variant,
+            "colors": wildcard_colors(row),
+        }
+    elif variant == "natural":
+        overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+    else:
+        overrides[wallpaper] = {"mode": "source-variant", "source_index": idx, "variant": variant}
     save_overrides(overrides)
     apply_sync()
-    print(f"set source-index {idx} for {Path(wallpaper).name}")
+    label = f"wild/{variant}" if idx == "wild" else f"{idx}{'' if variant == 'natural' else '/' + variant}"
+    print(f"set source {label} for {Path(wallpaper).name}")
     raise SystemExit(0)
 
 if mode == "set-accent":
@@ -230,7 +420,7 @@ if mode == "breed":
     if len(palettes) < 2:
         raise SystemExit("not enough theme palettes to breed")
     rows = matugen_candidates()
-    row_options = [candidate_label(row) for row in rows if row[0] in palettes]
+    row_options = [candidate_label(row) for row in rows if row["variant"] == "natural" and row["source_index"] in palettes]
     if len(args) >= 2:
         try:
             first_idx = int(args[0])
@@ -240,8 +430,8 @@ if mode == "breed":
     else:
         first_choice = rofi_choice(row_options, "breed parent A") if Path("/usr/bin/rofi").exists() else ""
         second_choice = rofi_choice(row_options, "breed parent B") if Path("/usr/bin/rofi").exists() else ""
-        first_idx = parse_source_index(first_choice)
-        second_idx = parse_source_index(second_choice)
+        first_idx, _ = parse_source_choice(first_choice)
+        second_idx, _ = parse_source_choice(second_choice)
     if first_idx not in palettes or second_idx not in palettes:
         raise SystemExit("invalid breed parent selection")
     anchor_idx = min(palettes.keys())
@@ -260,10 +450,10 @@ if mode == "breed":
 if mode != "pick":
     raise SystemExit("usage: theme-colour [pick|breed|clear|show|set-index|set-accent]")
 
-rows = matugen_candidates()
+rows = matugen_candidates() + wildcard_candidates()
 options = [
-    candidate_label((idx, primary, secondary, tertiary))
-    for idx, primary, secondary, tertiary in rows
+    candidate_label(row)
+    for row in rows
 ]
 options.append("breed palette: select two parents")
 options.append("custom accent: enter #RRGGBB")
@@ -294,25 +484,42 @@ if choice.startswith("custom accent:"):
     raise SystemExit(0)
 
 if choice.startswith("breed palette:"):
-    options = [candidate_label(row) for row in rows]
+    options = [candidate_label(row) for row in rows if row["variant"] == "natural"]
     first_choice = rofi_choice(options, "breed parent A")
     second_choice = rofi_choice(options, "breed parent B")
-    first_idx = parse_source_index(first_choice)
-    second_idx = parse_source_index(second_choice)
+    first_idx, _ = parse_source_choice(first_choice)
+    second_idx, _ = parse_source_choice(second_choice)
     if first_idx is None or second_idx is None:
         print("invalid breed selection")
         raise SystemExit(1)
     subprocess.run([str(root / "scripts" / "theme-colour"), "breed", str(first_idx), str(second_idx), wallpaper], check=True)
     raise SystemExit(0)
 
-match = re.match(r"source\s+(\d+):", choice)
-if not match:
+idx, variant = parse_source_choice(choice)
+if idx is None and choice.startswith("wildcard "):
+    match = re.match(r"wildcard\s+(\d+):", choice)
+    idx = "wild"
+    variant = int(match.group(1)) if match else None
+if idx is None or variant is None:
     print("invalid selection")
     raise SystemExit(1)
 
-idx = int(match.group(1))
-overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+if idx == "wild":
+    row = next((item for item in rows if item.get("wildcard_index") == variant), None)
+    if row is None:
+        print("invalid wildcard selection")
+        raise SystemExit(1)
+    overrides[wallpaper] = {
+        "mode": "wildcard-palette",
+        "wildcard_index": variant,
+        "colors": wildcard_colors(row),
+    }
+elif variant == "natural":
+    overrides[wallpaper] = {"mode": "source-index", "source_index": idx}
+else:
+    overrides[wallpaper] = {"mode": "source-variant", "source_index": idx, "variant": variant}
 save_overrides(overrides)
 apply_sync()
-print(f"set source-index {idx} for {Path(wallpaper).name}")
+label = f"wild/{variant}" if idx == "wild" else f"{idx}{'' if variant == 'natural' else '/' + variant}"
+print(f"set source {label} for {Path(wallpaper).name}")
 PY

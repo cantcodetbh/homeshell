@@ -1,13 +1,13 @@
 <svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
 <g id="moon-full" clip-path="url(#clip0_1868_4559)">
 <g id="Moon Phase">
-<circle id="Moon" cx="64" cy="64" r="31.5" fill="#bfc8cc" stroke="#bfc8cc" stroke-linecap="round" stroke-linejoin="round"/>
+<circle id="Moon" cx="64" cy="64" r="31.5" fill="#c7c8b8" stroke="#c7c8b8" stroke-linecap="round" stroke-linejoin="round"><animateTransform attributeName="transform" type="rotate" values="-6 64.0 64.0;6 64.0 64.0;-6 64.0 64.0" dur="3s" begin="0s" repeatCount="indefinite" calcMode="spline" keySplines=".42 0 .58 1; .42 0 .58 1"/></circle>
 </g>
 </g>
 <defs>
 <linearGradient id="paint0_linear_1868_4559" x1="64" y1="32" x2="64" y2="96" gradientUnits="userSpaceOnUse">
-<stop stop-color="#bfc8cc"/>
-<stop offset="1" stop-color="#bfc8cc"/>
+<stop stop-color="#c7c8b8"/>
+<stop offset="1" stop-color="#c7c8b8"/>
 </linearGradient>
 <clipPath id="clip0_1868_4559">
 <rect width="128" height="128" fill="white"/>
