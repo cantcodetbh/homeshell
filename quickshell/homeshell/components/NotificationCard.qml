@@ -1,22 +1,13 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell.Services.Notifications
+import "ShellFinder.js" as ShellFinder
 
 Rectangle {
   id: card
   property var shell: null
 
-  function findShell() {
-    var p = parent
-    while (p) {
-      if (p.shell) return p.shell
-      if (typeof p.baseDir === 'string' && typeof p.drawerMode === 'string') return p
-      p = p.parent
-    }
-    return null
-  }
-
-  Component.onCompleted: { if (shell === null) shell = findShell() }
+  Component.onCompleted: { if (shell === null) shell = ShellFinder.findShell(parent) }
 
   property var notification
   property bool hovered: false

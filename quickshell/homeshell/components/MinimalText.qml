@@ -1,20 +1,11 @@
 import QtQuick
+import "ShellFinder.js" as ShellFinder
 
 Text {
   id: component
   property var shell: null
 
-  function findShell() {
-    var p = parent
-    while (p) {
-      if (p.shell) return p.shell
-      if (typeof p.baseDir === 'string' && typeof p.drawerMode === 'string') return p
-      p = p.parent
-    }
-    return null
-  }
-
-  Component.onCompleted: { if (shell === null) shell = findShell() }
+  Component.onCompleted: { if (shell === null) shell = ShellFinder.findShell(parent) }
 
   color: shell ? shell.textColor : "#efe4dc"
   font.family: "JetBrainsMono Nerd Font"

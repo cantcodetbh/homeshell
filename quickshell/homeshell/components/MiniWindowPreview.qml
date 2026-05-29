@@ -1,21 +1,12 @@
 import QtQuick
 import Quickshell.Wayland
+import "ShellFinder.js" as ShellFinder
 
 Rectangle {
   id: miniWindow
   property var shell: null
 
-  function findShell() {
-    var p = parent
-    while (p) {
-      if (p.shell) return p.shell
-      if (p && typeof p.baseDir !== "undefined" && typeof p.drawerMode !== "undefined") return p
-      p = p.parent
-    }
-    return null
-  }
-
-  Component.onCompleted: { if (shell === null) shell = findShell() }
+  Component.onCompleted: { if (shell === null) shell = ShellFinder.findShell(parent) }
 
   property var client
   property var clients: []

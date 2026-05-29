@@ -1,21 +1,12 @@
 import QtQuick
 import QtQuick.Layouts
+import "ShellFinder.js" as ShellFinder
 
 Rectangle {
   id: mark
   property var shell: null
 
-  function findShell() {
-    var p = parent
-    while (p) {
-      if (p.shell) return p.shell
-      if (typeof p.baseDir === 'string' && typeof p.drawerMode === 'string') return p
-      p = p.parent
-    }
-    return null
-  }
-
-  Component.onCompleted: { if (shell === null) shell = findShell() }
+  Component.onCompleted: { if (shell === null) shell = ShellFinder.findShell(parent) }
 
   property int wid: 1
   property string label: "1"
